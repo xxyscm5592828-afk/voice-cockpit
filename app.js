@@ -274,6 +274,36 @@ class Visualizer {
   }
 }
 
+// === SECTION 6: 模式 1 - 引擎滑音 ===
+
+function startGlissando() {
+  setState(STATE.RECORDING_GLISSANDO);
+  // pitchHistory 已经在 onModeChange 中清空
+  const modeReadout = document.getElementById('mode-readout');
+  // 实时计算平滑度
+  engine.onPitch = (freq) => {
+    const cents = freq ? freqToCents(freq, 440) : null;
+    pitchHistory.push(cents);
+    if (pitchHistory.length > 100) pitchHistory.shift();
+    currentNoteEl.textContent = freq ? freqToNoteName(freq) : '—';
+    const smoothness = calcSmoothness(pitchHistory.filter(x => x !== null));
+    modeReadout.textContent = `平滑度: ${Math.round(smoothness * 100)}%`;
+  };
+}
+
+// --- 模式 3/4 占位（待 Task 9/10 替换）---
+function startResonance() {
+  setState(STATE.IDLE);
+  showError('共振对齐模式尚未实现（等待 Task 9）');
+  engine.stop();
+}
+
+function startFollow() {
+  setState(STATE.IDLE);
+  showError('跟唱模式尚未实现（等待 Task 10）');
+  engine.stop();
+}
+
 // === SECTION 10: 状态机 ===
 
 const STATE = {
@@ -428,6 +458,10 @@ if (typeof document !== 'undefined') {
 }
 
 function onPrimaryStart() {
-  // 占位：模式逻辑在后续任务中实现
-  setState(STATE.RECORDING_GLISSANDO);
+  switch (currentMode) {
+    case 'glissando': return startGlissando();
+    case 'cruise': return startCruise();
+    case 'resonance': return startResonance();
+    case 'follow': return startFollow();
+  }
 }

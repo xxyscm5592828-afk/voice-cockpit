@@ -274,6 +274,90 @@ class Visualizer {
   }
 }
 
+// === SECTION 5: 旋律数据 ===
+
+// 每首: { name, bpm, notes: [{note, start, duration}] }
+// 起始 start 单位 = 秒
+const MELODIES = {
+  happy_birthday: {
+    name: '生日快乐',
+    bpm: 120,
+    notes: [
+      // 第一句: Happy birthday to you
+      { note: 'C4', start: 0.0,  duration: 0.5 },
+      { note: 'C4', start: 0.5,  duration: 0.25 },
+      { note: 'D4', start: 0.75, duration: 0.75 },
+      { note: 'C4', start: 1.5,  duration: 0.75 },
+      { note: 'F4', start: 2.25, duration: 0.75 },
+      { note: 'E4', start: 3.0,  duration: 1.5 },
+      // 第二句: Happy birthday to you
+      { note: 'C4', start: 4.5,  duration: 0.5 },
+      { note: 'C4', start: 5.0,  duration: 0.25 },
+      { note: 'D4', start: 5.25, duration: 0.75 },
+      { note: 'C4', start: 6.0,  duration: 0.75 },
+      { note: 'G4', start: 6.75, duration: 0.75 },
+      { note: 'F4', start: 7.5,  duration: 1.5 },
+      // 第三句: Happy birthday dear ___
+      { note: 'C4', start: 9.0,  duration: 0.5 },
+      { note: 'C4', start: 9.5,  duration: 0.25 },
+      { note: 'C5', start: 9.75, duration: 0.75 },
+      { note: 'A4', start: 10.5, duration: 0.75 },
+      { note: 'F4', start: 11.25, duration: 0.75 },
+      { note: 'E4', start: 12.0, duration: 0.75 },
+      { note: 'D4', start: 12.75, duration: 0.75 },
+      // 第四句: Happy birthday to you
+      { note: 'Bb4', start: 13.5, duration: 0.5 },
+      { note: 'Bb4', start: 14.0, duration: 0.25 },
+      { note: 'A4', start: 14.25, duration: 0.75 },
+      { note: 'F4', start: 15.0, duration: 0.75 },
+      { note: 'G4', start: 15.75, duration: 0.75 },
+      { note: 'F4', start: 16.5, duration: 1.5 },
+    ],
+  },
+
+  twinkle: {
+    name: '小星星',
+    bpm: 120,
+    notes: [
+      { note: 'C4', start: 0.0,  duration: 0.5 },
+      { note: 'C4', start: 0.5,  duration: 0.5 },
+      { note: 'G4', start: 1.0,  duration: 0.5 },
+      { note: 'G4', start: 1.5,  duration: 0.5 },
+      { note: 'A4', start: 2.0,  duration: 0.5 },
+      { note: 'A4', start: 2.5,  duration: 0.5 },
+      { note: 'G4', start: 3.0,  duration: 1.0 },
+      { note: 'F4', start: 4.0,  duration: 0.5 },
+      { note: 'F4', start: 4.5,  duration: 0.5 },
+      { note: 'E4', start: 5.0,  duration: 0.5 },
+      { note: 'E4', start: 5.5,  duration: 0.5 },
+      { note: 'D4', start: 6.0,  duration: 0.5 },
+      { note: 'D4', start: 6.5,  duration: 0.5 },
+      { note: 'C4', start: 7.0,  duration: 1.0 },
+    ],
+  },
+};
+
+function melodyTotalDuration(melody) {
+  return melody.notes.reduce((max, n) => Math.max(max, n.start + n.duration), 0);
+}
+
+function findCurrentNote(melody, t) {
+  for (const n of melody.notes) {
+    if (t >= n.start && t < n.start + n.duration) return n;
+  }
+  return null;
+}
+
+function noteNameToFreq(name) {
+  // name like "C4", "F#5", "Bb4"
+  const m = name.match(/^([A-G]#?)(\d)$/);
+  if (!m) return 440;
+  const idx = NOTE_NAMES.indexOf(m[1]);
+  const octave = parseInt(m[2]);
+  const noteNum = (octave + 1) * 12 + idx;
+  return noteNumberToFreq(noteNum);
+}
+
 // === SECTION 6: 模式 1 - 引擎滑音 ===
 
 function startGlissando() {
@@ -289,12 +373,6 @@ function startGlissando() {
     const smoothness = calcSmoothness(pitchHistory.filter(x => x !== null));
     modeReadout.textContent = `平滑度: ${Math.round(smoothness * 100)}%`;
   };
-}
-
-function startFollow() {
-  setState(STATE.IDLE);
-  showError('跟唱模式尚未实现（等待 Task 10）');
-  engine.stop();
 }
 
 // === SECTION 7: 模式 2 - 直线巡航 ===
@@ -482,6 +560,145 @@ function renderResonance() {
   }
 }
 
+// === SECTION 9: 模式 4 - 跟唱旋律 ===
+
+let followMelody = null;
+let followAudioCtx = null;
+let followOsc = null;
+let followGain = null;
+let followStartTime = 0;
+let followSamples = [];  // {t, userFreq, targetFreq, inTune}
+let followOnTarget = 0;  // 在调帧数
+let followTotal = 0;       // 总帧数
+
+function startFollow() {
+  // MVP 简单版：直接用第一首旋律
+  followMelody = MELODIES.happy_birthday;
+  followSamples = [];
+  followOnTarget = 0;
+  followTotal = 0;
+
+  setState(STATE.COUNTDOWN);
+  document.getElementById('mode-readout').textContent = '3...';
+  let n = 3;
+  const cd = setInterval(() => {
+    n--;
+    if (n > 0) {
+      document.getElementById('mode-readout').textContent = n + '...';
+    } else {
+      clearInterval(cd);
+      actuallyStartFollow();
+    }
+  }, 1000);
+}
+
+function actuallyStartFollow() {
+  setState(STATE.SINGING);
+  followAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  followGain = followAudioCtx.createGain();
+  followGain.gain.value = CONFIG.REFERENCE_GAIN;
+  followGain.connect(followAudioCtx.destination);
+
+  // 调度所有音符
+  const t0 = followAudioCtx.currentTime + 0.1;
+  for (const n of followMelody.notes) {
+    const osc = followAudioCtx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = noteNameToFreq(n.note);
+    // 短 envelope 避免爆音
+    const g = followAudioCtx.createGain();
+    g.gain.setValueAtTime(0, t0 + n.start);
+    g.gain.linearRampToValueAtTime(1, t0 + n.start + 0.01);
+    g.gain.setValueAtTime(1, t0 + n.start + n.duration - 0.01);
+    g.gain.linearRampToValueAtTime(0, t0 + n.start + n.duration);
+    osc.connect(g).connect(followGain);
+    osc.start(t0 + n.start);
+    osc.stop(t0 + n.start + n.duration + 0.01);
+  }
+
+  followStartTime = performance.now() + 100;  // 同步
+  const audioT0 = t0;
+
+  // 检测用户音高
+  engine.onPitch = (freq) => {
+    const t = (performance.now() - followStartTime) / 1000;
+    if (t < 0) return;
+    const target = findCurrentNote(followMelody, t);
+    const targetFreq = target ? noteNameToFreq(target.note) : null;
+    const inTune = (freq && targetFreq) ? isInTune(freq, targetFreq) : null;
+    followSamples.push({ t, userFreq: freq, targetFreq, inTune });
+    if (inTune !== null) {
+      followTotal++;
+      if (inTune) followOnTarget++;
+    }
+    currentNoteEl.textContent = freq ? freqToNoteName(freq) : (target ? target.note : '—');
+    if (followTotal > 0) {
+      document.getElementById('mode-readout').textContent =
+        `当前: ${target ? target.note : '—'} | 准确率: ${Math.round(followOnTarget / followTotal * 100)}%`;
+    }
+  };
+
+  // 结束后进入 RESULT
+  const totalDur = melodyTotalDuration(followMelody);
+  setTimeout(() => {
+    setState(STATE.RESULT);
+    const acc = followTotal > 0 ? Math.round(followOnTarget / followTotal * 100) : 0;
+    document.getElementById('mode-readout').innerHTML = `🎉 准确率: <strong>${acc}%</strong>`;
+  }, (totalDur + 0.2) * 1000);
+}
+
+// 渲染：x = 时间 0~总时长, y = 频率
+function renderFollow() {
+  if (currentMode !== 'follow') return;
+  if (![STATE.SINGING, STATE.RESULT].includes(currentState)) return;
+  const melody = followMelody;
+  if (!melody) return;
+  const total = melodyTotalDuration(melody);
+  const yMin = noteNameToFreq('C4') * 0.9;
+  const yMax = noteNameToFreq('C5') * 1.1;
+  viz.clear();
+  viz.drawGrid(yMin, yMax, (v) => v.toFixed(0) + 'Hz');
+
+  // 目标曲线：阶梯化
+  const tNow = currentState === STATE.RESULT ? total : (performance.now() - followStartTime) / 1000;
+  viz.ctx.strokeStyle = COLORS.REFERENCE;
+  viz.ctx.lineWidth = 2.5;
+  viz.ctx.beginPath();
+  let started = false;
+  for (const n of melody.notes) {
+    if (n.start > tNow + 0.1) break;
+    const f = noteNameToFreq(n.note);
+    const x1 = (n.start / total) * viz.w;
+    const x2 = Math.min(tNow, n.start + n.duration) / total * viz.w;
+    if (x1 >= viz.w) break;
+    const yNorm = (f - yMin) / (yMax - yMin);
+    const y = viz.h - Math.max(0, Math.min(1, yNorm)) * viz.h;
+    if (!started) { viz.ctx.moveTo(x1, y); started = true; }
+    else viz.ctx.lineTo(x1, y);
+    viz.ctx.lineTo(x2, y);
+  }
+  viz.ctx.stroke();
+
+  // 用户曲线（按 inTune 着色）
+  const pts = followSamples.filter(s => s.t <= tNow);
+  for (let i = 1; i < pts.length; i++) {
+    if (!pts[i].userFreq || !pts[i - 1].userFreq) continue;
+    const color = pts[i].inTune ? COLORS.USER : COLORS.USER_BAD;
+    viz.ctx.strokeStyle = color;
+    viz.ctx.lineWidth = 2.5;
+    viz.ctx.beginPath();
+    const x1 = (pts[i - 1].t / total) * viz.w;
+    const x2 = (pts[i].t / total) * viz.w;
+    const y1N = (pts[i - 1].userFreq - yMin) / (yMax - yMin);
+    const y2N = (pts[i].userFreq - yMin) / (yMax - yMin);
+    const y1 = viz.h - Math.max(0, Math.min(1, y1N)) * viz.h;
+    const y2 = viz.h - Math.max(0, Math.min(1, y2N)) * viz.h;
+    viz.ctx.moveTo(x1, y1);
+    viz.ctx.lineTo(x2, y2);
+    viz.ctx.stroke();
+  }
+}
+
 // === SECTION 10: 状态机 ===
 
 const STATE = {
@@ -605,6 +822,7 @@ if (typeof document !== 'undefined') {
       viz.drawGrid(-1200, 1200, (v) => (v >= 0 ? '+' : '') + Math.round(v) + '¢');
       viz.drawCurve(pitchHistory, -1200, 1200, COLORS.USER);
       renderResonance();
+      renderFollow();
       requestAnimationFrame(renderLoop);
     }
     renderLoop();
@@ -622,14 +840,9 @@ if (typeof document !== 'undefined') {
 
     document.getElementById('secondary-btn').addEventListener('click', () => {
       engine.stop();
-      if (resonanceOsc) {
-        try { resonanceOsc.stop(); } catch (e) {}
-        resonanceOsc = null;
-      }
-      if (resonanceAudioCtx) {
-        resonanceAudioCtx.close();
-        resonanceAudioCtx = null;
-      }
+      if (resonanceOsc) { try { resonanceOsc.stop(); } catch (e) {} resonanceOsc = null; }
+      if (resonanceAudioCtx) { resonanceAudioCtx.close(); resonanceAudioCtx = null; }
+      if (followAudioCtx) { followAudioCtx.close(); followAudioCtx = null; }
       setState(STATE.IDLE);
     });
 

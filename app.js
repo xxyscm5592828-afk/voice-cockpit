@@ -67,6 +67,15 @@ function isInTune(userFreq, targetFreq) {
   return Math.abs(freqToCents(userFreq, targetFreq)) <= CONFIG.CENTS_THRESHOLD;
 }
 
+// 把音名转成 MIDI 数字（"C4" → 60）
+function noteNameToMidi(name) {
+  const m = name.match(/^([A-G]#?)(\d)$/);
+  if (!m) return 60;
+  const idx = NOTE_NAMES.indexOf(m[1]);
+  const octave = parseInt(m[2]);
+  return (octave + 1) * 12 + idx;
+}
+
 // 计算最近 N 秒窗口的稳定度（0-1）
 function calcStability(centsHistory) {
   if (centsHistory.length < 2) return 0;
@@ -101,6 +110,28 @@ export { freqToNoteNumber, noteNumberToFreq, freqToNoteName, freqToCents, isInTu
 
 // === SECTION 3: 音频采集 + 音高检测 ===
 
+// 中值滤波器：用最近 N 个采样点的中位数平滑曲线
+class MedianFilter {
+  constructor(size = 3) {
+    this.size = size;
+    this.buffer = [];
+  }
+  push(value) {
+    this.buffer.push(value);
+    if (this.buffer.length > this.size) this.buffer.shift();
+    return this._median();
+  }
+  reset() {
+    this.buffer = [];
+  }
+  _median() {
+    if (this.buffer.length === 0) return null;
+    const sorted = [...this.buffer].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+}
+
 class PitchEngine {
   constructor() {
     this.audioCtx = null;
@@ -112,6 +143,9 @@ class PitchEngine {
     this.onPitch = null;  // (freqHz | null, clarity) => void
     this.onLevel = null;  // (rms 0-1) => void
     this._timer = null;
+    // 中值滤波器，平滑音高曲线（保留原值无 clarity 时仍可用）
+    this.pitchFilter = new MedianFilter(3);
+    this.lastSmoothed = null;
   }
 
   async start() {
@@ -147,11 +181,15 @@ class PitchEngine {
     if (this.onLevel) this.onLevel(rms);
     if (rms < 0.005) watchSilence(); else clearSilenceWatch();
 
-    // 音高
+    // 音高 - 经过中值滤波后传给 onPitch
     const [pitch, clarity] = this.detector.findPitch(this.buffer, this.audioCtx.sampleRate);
     if (pitch >= CONFIG.PITCH_MIN_HZ && pitch <= CONFIG.PITCH_MAX_HZ && clarity > 0.9) {
-      if (this.onPitch) this.onPitch(pitch, clarity);
+      const smoothed = this.pitchFilter.push(pitch);
+      this.lastSmoothed = smoothed;
+      if (this.onPitch) this.onPitch(smoothed, clarity);
     } else {
+      this.pitchFilter.reset();
+      this.lastSmoothed = null;
       if (this.onPitch) this.onPitch(null, 0);
     }
 
@@ -288,6 +326,88 @@ class Visualizer {
     this.ctx.stroke();
   }
 
+  // 用 MIDI 数字画 Y 轴音名网格（"C4" ~ "C5"）
+  drawNoteGrid(minNote, maxNote) {
+    const minMidi = noteNameToMidi(minNote);
+    const maxMidi = noteNameToMidi(maxNote);
+    this.ctx.strokeStyle = COLORS.GRID;
+    this.ctx.lineWidth = 1;
+    this.ctx.fillStyle = COLORS.TEXT_DIM;
+    this.ctx.font = '12px sans-serif';
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'middle';
+    for (let m = minMidi; m <= maxMidi; m++) {
+      const y = this.h - (m - minMidi) / (maxMidi - minMidi) * this.h;
+      this.ctx.beginPath();
+      this.ctx.moveTo(0, y);
+      this.ctx.lineTo(this.w, y);
+      this.ctx.stroke();
+      // 音名 = C, C#, D, ... B（不带八度）
+      const noteName = NOTE_NAMES[((m % 12) + 12) % 12];
+      this.ctx.fillText(noteName, 5, y);
+    }
+  }
+
+  // 用 MIDI 数字画曲线（pitchHistoryMidi 用之）
+  drawCurveByMidi(samples, minMidi, maxMidi, color = COLORS.USER, lineWidth = 2.5) {
+    if (samples.length < 2) return;
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = lineWidth;
+    this.ctx.lineJoin = 'round';
+    this.ctx.beginPath();
+    const n = samples.length;
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * this.w;
+      const yNorm = (samples[i] - minMidi) / (maxMidi - minMidi);
+      const y = this.h - Math.max(0, Math.min(1, yNorm)) * this.h;
+      if (i === 0) this.ctx.moveTo(x, y);
+      else this.ctx.lineTo(x, y);
+    }
+    this.ctx.stroke();
+  }
+
+  // 当前音高指示（右侧条 + 音名标签）
+  drawCurrentPitchIndicator(midi, minMidi, maxMidi, noteName, color = COLORS.USER) {
+    if (midi == null) return;
+    const yNorm = (midi - minMidi) / (maxMidi - minMidi);
+    const y = this.h - Math.max(0, Math.min(1, yNorm)) * this.h;
+    // 发光横线
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = 2;
+    this.ctx.shadowColor = color;
+    this.ctx.shadowBlur = 10;
+    this.ctx.beginPath();
+    this.ctx.moveTo(0, y);
+    this.ctx.lineTo(this.w, y);
+    this.ctx.stroke();
+    this.ctx.shadowBlur = 0;
+    // 音名标签（右上角）
+    this.ctx.fillStyle = color;
+    this.ctx.font = 'bold 24px sans-serif';
+    this.ctx.textAlign = 'right';
+    this.ctx.fillText(noteName, this.w - 8, y - 12);
+  }
+
+  // 当前音高脉冲点（带相位动画）
+  drawPitchDot(midi, minMidi, maxMidi, phase, color = COLORS.USER) {
+    if (midi == null) return;
+    const x = this.w - 50;
+    const yNorm = (midi - minMidi) / (maxMidi - minMidi);
+    const y = this.h - Math.max(0, Math.min(1, yNorm)) * this.h;
+    const radius = 8 + Math.sin(phase) * 3;
+    // 光晕
+    const grad = this.ctx.createRadialGradient(x, y, 0, x, y, radius * 4);
+    grad.addColorStop(0, color + 'cc');
+    grad.addColorStop(1, color + '00');
+    this.ctx.fillStyle = grad;
+    this.ctx.fillRect(x - radius * 4, y - radius * 4, radius * 8, radius * 8);
+    // 实心点
+    this.ctx.fillStyle = color;
+    this.ctx.beginPath();
+    this.ctx.arc(x, y, radius, 0, Math.PI * 2);
+    this.ctx.fill();
+  }
+
   // 在指定位置画一个点（用于标记融合点等）
   drawMarker(xRatio, yValue, yMin, yMax, color = COLORS.FUSION, radius = 8) {
     const x = xRatio * this.w;
@@ -393,15 +513,28 @@ function noteNameToFreq(name) {
 
 // === SECTION 6: 模式 1 - 引擎滑音 ===
 
+// pitchHistoryMidi: 存 MIDI 数字，给音名 Y 轴可视化用
+let pitchHistoryMidi = [];
+
 function startGlissando() {
   setState(STATE.RECORDING_GLISSANDO);
   // pitchHistory 已经在 onModeChange 中清空
   const modeReadout = document.getElementById('mode-readout');
   // 实时计算平滑度
   engine.onPitch = (freq) => {
-    const cents = freq ? freqToCents(freq, 440) : null;
-    pitchHistory.push(cents);
-    if (pitchHistory.length > 100) pitchHistory.shift();
+    if (freq) {
+      const cents = freqToCents(freq, 440);
+      const midi = freqToNoteNumber(freq);
+      pitchHistory.push(cents);
+      pitchHistoryMidi.push(midi);
+      if (pitchHistory.length > 100) pitchHistory.shift();
+      if (pitchHistoryMidi.length > 100) pitchHistoryMidi.shift();
+    } else {
+      pitchHistory.push(null);
+      pitchHistoryMidi.push(null);
+      if (pitchHistory.length > 100) pitchHistory.shift();
+      if (pitchHistoryMidi.length > 100) pitchHistoryMidi.shift();
+    }
     currentNoteEl.textContent = freq ? freqToNoteName(freq) : '—';
     const smoothness = calcSmoothness(pitchHistory.filter(x => x !== null));
     modeReadout.textContent = `平滑度: ${Math.round(smoothness * 100)}%`;
@@ -813,6 +946,7 @@ function setupTabs() {
 
 function onModeChange() {
   pitchHistory.length = 0;
+  pitchHistoryMidi.length = 0;
   cruiseHistory = [];
   viz.clear();
   currentNoteEl.textContent = '—';
@@ -833,6 +967,9 @@ function showError(msg) {
 
 let engine, viz, currentNoteEl, levelFill, pitchHistory;
 
+// 动画相位：每帧递增，给 drawPitchDot 脉冲用
+let animPhase = 0;
+
 if (typeof document !== 'undefined') {
   const onReady = () => {
     if (!checkBrowserSupport()) return;
@@ -852,12 +989,37 @@ if (typeof document !== 'undefined') {
       levelFill.style.width = Math.min(100, rms * 400) + '%';
     };
 
+    // 引擎滑音模式的 MIDI Y 轴范围（C4 ~ C5）
+    const GLISSANDO_MIN_MIDI = 60;
+    const GLISSANDO_MAX_MIDI = 72;
+
     function renderLoop() {
       viz.clear();
-      viz.drawGrid(-1200, 1200, (v) => (v >= 0 ? '+' : '') + Math.round(v) + '¢');
-      viz.drawCurve(pitchHistory, -1200, 1200, COLORS.USER);
+      if (currentMode === 'glissando') {
+        // 引擎滑音：音名 Y 轴 + MIDI 曲线 + 当前音高指示 + 脉冲点
+        viz.drawNoteGrid('C4', 'C5');
+        viz.drawCurveByMidi(pitchHistoryMidi, GLISSANDO_MIN_MIDI, GLISSANDO_MAX_MIDI, COLORS.USER);
+        const lastMidi = pitchHistoryMidi[pitchHistoryMidi.length - 1];
+        if (lastMidi != null) {
+          const noteName = freqToNoteName(noteNumberToFreq(lastMidi));
+          viz.drawCurrentPitchIndicator(lastMidi, GLISSANDO_MIN_MIDI, GLISSANDO_MAX_MIDI, noteName, COLORS.USER);
+          viz.drawPitchDot(lastMidi, GLISSANDO_MIN_MIDI, GLISSANDO_MAX_MIDI, animPhase, COLORS.USER);
+        }
+      } else if (currentMode === 'cruise') {
+        // 直线巡航：cents Y 轴 + 目标线 + ±50 cents 边界线（虚线，淡色）
+        viz.drawGrid(-100, 100, (v) => (v >= 0 ? '+' : '') + Math.round(v) + '¢');
+        viz.drawTargetLine(0, -100, 100, COLORS.TARGET, '目标');
+        viz.drawTargetLine(-50, -100, 100, '#475569', '');
+        viz.drawTargetLine(50, -100, 100, '#475569', '');
+        viz.drawCurve(cruiseHistory, -100, 100, COLORS.USER);
+      } else {
+        // 共振 / 跟唱：default（会被 renderResonance/renderFollow 覆盖）
+        viz.drawGrid(-1200, 1200, (v) => (v >= 0 ? '+' : '') + Math.round(v) + '¢');
+        viz.drawCurve(pitchHistory, -1200, 1200, COLORS.USER);
+      }
       renderResonance();
       renderFollow();
+      animPhase += 0.1;
       requestAnimationFrame(renderLoop);
     }
     renderLoop();

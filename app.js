@@ -812,13 +812,14 @@ function setupTabs() {
 }
 
 function onModeChange() {
-  // 重置可视化
   pitchHistory.length = 0;
+  cruiseHistory = [];
   viz.clear();
   currentNoteEl.textContent = '—';
-  // 模式标签在 readout 显示
   const labels = { glissando: '引擎滑音', cruise: '直线巡航', resonance: '共振对齐', follow: '跟唱' };
   document.getElementById('mode-readout').textContent = labels[currentMode];
+  // 清掉 error banner
+  document.getElementById('error-banner').hidden = true;
 }
 
 function showError(msg) {

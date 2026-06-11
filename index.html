@@ -29,12 +29,42 @@
       <span>音量:</span>
       <div class="level-bar"><div id="level-fill"></div></div>
     </div>
+
+    <aside class="tuner" id="tuner">
+      <div class="tuner-note" id="tuner-note">—</div>
+      <div class="tuner-gauge">
+        <div class="tuner-scale">
+          <span>-50</span>
+          <span>-20</span>
+          <span>0</span>
+          <span>+20</span>
+          <span>+50</span>
+        </div>
+        <div class="tuner-track">
+          <div class="tuner-needle" id="tuner-needle"></div>
+          <div class="tuner-center"></div>
+        </div>
+        <div class="tuner-cents" id="tuner-cents">0 cents</div>
+      </div>
+    </aside>
   </main>
 
   <footer class="controls">
     <button id="primary-btn" class="primary">▶ 开始</button>
     <button id="secondary-btn" class="secondary" hidden>停止</button>
+    <button class="stats-btn" id="stats-btn" title="查看成绩统计">📊</button>
   </footer>
+
+  <div class="stats-modal" id="stats-modal" hidden>
+    <div class="stats-modal-content">
+      <h2>练习统计</h2>
+      <div id="stats-content"></div>
+      <div class="stats-actions">
+        <button id="stats-reset" class="secondary">重置数据</button>
+        <button id="stats-close" class="primary">关闭</button>
+      </div>
+    </div>
+  </div>
 
   <div id="error-banner" class="error-banner" hidden></div>
 

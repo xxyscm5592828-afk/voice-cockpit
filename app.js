@@ -516,8 +516,19 @@ function noteNameToFreq(name) {
 // pitchHistoryMidi: 存 MIDI 数字，给音名 Y 轴可视化用
 let pitchHistoryMidi = [];
 
+// 当前 session 指标 + 开始时间（统计用）
+let sessionStartMs = null;
+let sessionMetrics = {
+  glissando: { bestSmoothness: 0 },
+  cruise: { bestStability: 0 },
+  resonance: { completed: false },
+  follow: { bestAccuracy: 0 },
+};
+
 function startGlissando() {
   setState(STATE.RECORDING_GLISSANDO);
+  sessionStartMs = performance.now();
+  sessionMetrics.glissando = { bestSmoothness: 0 };
   // pitchHistory 已经在 onModeChange 中清空
   const modeReadout = document.getElementById('mode-readout');
   // 实时计算平滑度
@@ -538,6 +549,9 @@ function startGlissando() {
     currentNoteEl.textContent = freq ? freqToNoteName(freq) : '—';
     const smoothness = calcSmoothness(pitchHistory.filter(x => x !== null));
     modeReadout.textContent = `平滑度: ${Math.round(smoothness * 100)}%`;
+    if (smoothness > sessionMetrics.glissando.bestSmoothness) {
+      sessionMetrics.glissando.bestSmoothness = smoothness;
+    }
   };
 }
 
@@ -548,6 +562,8 @@ let cruiseHistory = [];      // cents 偏离历史（最近 2 秒 = 40 帧）
 
 function startCruise() {
   setState(STATE.RECORDING_STABLE);
+  sessionStartMs = performance.now();
+  sessionMetrics.cruise = { bestStability: 0 };
   cruiseHistory = [];
   const modeReadout = document.getElementById('mode-readout');
   // 临时把「模式相关数值」改为显示目标音 + 偏离
@@ -567,6 +583,9 @@ function startCruise() {
     if (valid.length > 1) {
       const stab = calcStability(valid);
       document.getElementById('stability').textContent = Math.round(stab * 100) + '%';
+      if (stab > sessionMetrics.cruise.bestStability) {
+        sessionMetrics.cruise.bestStability = stab;
+      }
     }
   };
 }
@@ -582,6 +601,8 @@ let resonanceSamples = [];  // {t, userFreq, refFreq}
 
 function startResonance() {
   setState(STATE.LISTENING);
+  sessionStartMs = performance.now();
+  sessionMetrics.resonance = { completed: false };
   resonanceSamples = [];
   const modeReadout = document.getElementById('mode-readout');
   modeReadout.textContent = '请发一个稳定的「啊」';
@@ -658,6 +679,7 @@ function startResonanceGlissando() {
   // 结束
   setTimeout(() => {
     setState(STATE.FUSED);
+    sessionMetrics.resonance.completed = true;
     document.getElementById('mode-readout').textContent = '感受到了吗？那就是「准」的感觉';
   }, (duration + 0.6) * 1000);
 }
@@ -743,6 +765,8 @@ function startFollow() {
   followSamples = [];
   followOnTarget = 0;
   followTotal = 0;
+  sessionStartMs = performance.now();
+  sessionMetrics.follow = { bestAccuracy: 0 };
 
   setState(STATE.COUNTDOWN);
   document.getElementById('mode-readout').textContent = '3...';
@@ -799,8 +823,12 @@ function actuallyStartFollow() {
     }
     currentNoteEl.textContent = freq ? freqToNoteName(freq) : (target ? target.note : '—');
     if (followTotal > 0) {
+      const acc = followOnTarget / followTotal;
       document.getElementById('mode-readout').textContent =
-        `当前: ${target ? target.note : '—'} | 准确率: ${Math.round(followOnTarget / followTotal * 100)}%`;
+        `当前: ${target ? target.note : '—'} | 准确率: ${Math.round(acc * 100)}%`;
+      if (acc > sessionMetrics.follow.bestAccuracy) {
+        sessionMetrics.follow.bestAccuracy = acc;
+      }
     }
   };
 
@@ -1019,6 +1047,8 @@ if (typeof document !== 'undefined') {
       }
       renderResonance();
       renderFollow();
+      // 调谐器读 engine.lastSmoothed（所有模式可用）
+      updateTuner(engine && engine.lastSmoothed);
       animPhase += 0.1;
       requestAnimationFrame(renderLoop);
     }
@@ -1040,6 +1070,13 @@ if (typeof document !== 'undefined') {
     });
 
     document.getElementById('secondary-btn').addEventListener('click', () => {
+      // 统计本次 session 指标（在 stop 之前，避免丢失状态）
+      if (sessionStartMs != null) {
+        const durationMs = performance.now() - sessionStartMs;
+        const metrics = sessionMetrics[currentMode] || {};
+        updateStatsOnSessionEnd(currentMode, metrics, durationMs);
+        sessionStartMs = null;
+      }
       engine.stop();
       if (resonanceOsc) { try { resonanceOsc.stop(); } catch (e) {} resonanceOsc = null; }
       if (resonanceAudioCtx) { resonanceAudioCtx.close(); resonanceAudioCtx = null; }
@@ -1049,6 +1086,8 @@ if (typeof document !== 'undefined') {
 
     setupTabs();
     onModeChange();  // 初始化标签
+    setupTuner();      // 调谐器 widget
+    setupStatsUI();    // 成绩统计模态
     console.log('声音驾驶舱已加载');
   };
   if (document.readyState === 'loading') {
@@ -1065,4 +1104,165 @@ function onPrimaryStart() {
     case 'resonance': return startResonance();
     case 'follow': return startFollow();
   }
+}
+
+// === SECTION 14: 调谐器 widget ===
+// 调谐器对所有模式都工作：计算最近半音的 cents 偏离
+let tunerNeedleEl, tunerNoteTextEl, tunerCentsEl, lastTunerNoteName = null;
+
+function setupTuner() {
+  tunerNeedleEl = document.getElementById('tuner-needle');
+  tunerNoteTextEl = document.getElementById('tuner-note');
+  tunerCentsEl = document.getElementById('tuner-cents');
+}
+
+// 把 freq 显示为调谐器：音名 + cents 偏离 + needle 位置 + 颜色
+function updateTuner(freq) {
+  if (!tunerNeedleEl) return;
+  if (!freq) {
+    tunerNeedleEl.style.left = '50%';
+    tunerNeedleEl.className = 'tuner-needle';
+    tunerNoteTextEl.textContent = '—';
+    tunerCentsEl.textContent = '—';
+    lastTunerNoteName = '—';
+    return;
+  }
+  // 找最近半音
+  const midi = freqToNoteNumber(freq);
+  const nearestMidi = Math.round(midi);
+  const cents = (midi - nearestMidi) * 100;
+  const noteName = freqToNoteName(freq);
+  // needle 位置：-50 cents → 0%，0 → 50%，+50 → 100%
+  const clampedCents = Math.max(-50, Math.min(50, cents));
+  const left = 50 + (clampedCents / 50) * 50;
+  tunerNeedleEl.style.left = left + '%';
+  // 颜色：|cents| <= 5 绿，<= 20 黄，否则红
+  const abs = Math.abs(cents);
+  const cls = abs <= 5 ? 'green' : abs <= 20 ? 'yellow' : 'red';
+  tunerNeedleEl.className = 'tuner-needle ' + cls;
+  // 音名 + cents 文本
+  tunerNoteTextEl.textContent = noteName;
+  tunerCentsEl.textContent = (cents >= 0 ? '+' : '') + cents.toFixed(0) + ' cents';
+  // 切换音名时闪烁
+  if (noteName !== lastTunerNoteName) {
+    tunerNoteTextEl.classList.remove('flash');
+    // 强制 reflow 重启动画
+    void tunerNoteTextEl.offsetWidth;
+    tunerNoteTextEl.classList.add('flash');
+    lastTunerNoteName = noteName;
+  }
+}
+
+// === SECTION 15: 成绩统计（localStorage）===
+
+const STATS_KEY = 'voice-cockpit-stats';
+
+function defaultStats() {
+  return {
+    totalSessions: 0,
+    totalDurationMs: 0,
+    perMode: {
+      glissando: { sessions: 0, bestSmoothness: 0, totalDurationMs: 0 },
+      cruise:     { sessions: 0, bestStability: 0,  totalDurationMs: 0 },
+      resonance: { sessions: 0, completions: 0,    totalDurationMs: 0 },
+      follow:     { sessions: 0, bestAccuracy: 0,   totalDurationMs: 0 },
+    },
+    lastUpdated: null,
+  };
+}
+
+function loadStats() {
+  try {
+    const raw = localStorage.getItem(STATS_KEY);
+    if (!raw) return defaultStats();
+    const parsed = JSON.parse(raw);
+    // 合并：防止新增字段后旧数据缺字段
+    return Object.assign(defaultStats(), parsed, {
+      perMode: Object.assign(defaultStats().perMode, parsed.perMode || {}),
+    });
+  } catch (e) {
+    return defaultStats();
+  }
+}
+
+function saveStats(s) {
+  try { localStorage.setItem(STATS_KEY, JSON.stringify(s)); } catch (e) { /* localStorage 不可用时静默 */ }
+}
+
+// 在 session 结束时调用：根据 mode 累加 session 数、时长、最高分
+function updateStatsOnSessionEnd(mode, metrics, durationMs) {
+  const s = loadStats();
+  s.totalSessions += 1;
+  s.totalDurationMs += durationMs;
+  s.lastUpdated = new Date().toISOString();
+  const m = s.perMode[mode];
+  if (!m) { saveStats(s); return; }
+  m.sessions += 1;
+  m.totalDurationMs = (m.totalDurationMs || 0) + durationMs;
+  if (mode === 'glissando' && metrics && typeof metrics.bestSmoothness === 'number') {
+    if (metrics.bestSmoothness > (m.bestSmoothness || 0)) m.bestSmoothness = metrics.bestSmoothness;
+  } else if (mode === 'cruise' && metrics && typeof metrics.bestStability === 'number') {
+    if (metrics.bestStability > (m.bestStability || 0)) m.bestStability = metrics.bestStability;
+  } else if (mode === 'resonance' && metrics && metrics.completed) {
+    m.completions = (m.completions || 0) + 1;
+  } else if (mode === 'follow' && metrics && typeof metrics.bestAccuracy === 'number') {
+    if (metrics.bestAccuracy > (m.bestAccuracy || 0)) m.bestAccuracy = metrics.bestAccuracy;
+  }
+  saveStats(s);
+}
+
+function formatDuration(ms) {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + ' 秒';
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return m + ' 分 ' + r + ' 秒';
+}
+
+function renderStats() {
+  const s = loadStats();
+  const el = document.getElementById('stats-content');
+  const pct = (x) => Math.round((x || 0) * 100) + '%';
+  const m = s.perMode;
+  el.innerHTML = `
+    <h3>总览</h3>
+    <div>总练习次数：<strong>${s.totalSessions}</strong> 次</div>
+    <div>总练习时长：<strong>${formatDuration(s.totalDurationMs)}</strong></div>
+    ${s.lastUpdated ? `<div>最近更新：${new Date(s.lastUpdated).toLocaleString('zh-CN')}</div>` : ''}
+    <h3>引擎滑音</h3>
+    <div>练习次数：<strong>${m.glissando.sessions}</strong> · 最高平滑度：<strong>${pct(m.glissando.bestSmoothness)}</strong></div>
+    <div>累计时长：${formatDuration(m.glissando.totalDurationMs)}</div>
+    <h3>直线巡航</h3>
+    <div>练习次数：<strong>${m.cruise.sessions}</strong> · 最高稳定度：<strong>${pct(m.cruise.bestStability)}</strong></div>
+    <div>累计时长：${formatDuration(m.cruise.totalDurationMs)}</div>
+    <h3>共振对齐</h3>
+    <div>练习次数：<strong>${m.resonance.sessions}</strong> · 完成次数：<strong>${m.resonance.completions || 0}</strong></div>
+    <div>累计时长：${formatDuration(m.resonance.totalDurationMs)}</div>
+    <h3>跟唱旋律</h3>
+    <div>练习次数：<strong>${m.follow.sessions}</strong> · 最高准确率：<strong>${pct(m.follow.bestAccuracy)}</strong></div>
+    <div>累计时长：${formatDuration(m.follow.totalDurationMs)}</div>
+  `;
+}
+
+function setupStatsUI() {
+  const btn = document.getElementById('stats-btn');
+  const modal = document.getElementById('stats-modal');
+  const closeBtn = document.getElementById('stats-close');
+  const resetBtn = document.getElementById('stats-reset');
+  if (!btn || !modal) return;
+  btn.addEventListener('click', () => {
+    renderStats();
+    modal.hidden = false;
+  });
+  closeBtn.addEventListener('click', () => { modal.hidden = true; });
+  // 点遮罩关闭
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.hidden = true;
+  });
+  resetBtn.addEventListener('click', () => {
+    if (confirm('确认要重置所有练习数据吗？')) {
+      saveStats(defaultStats());
+      renderStats();
+    }
+  });
 }

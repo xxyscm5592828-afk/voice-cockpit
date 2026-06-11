@@ -274,16 +274,116 @@ class Visualizer {
   }
 }
 
+// === SECTION 10: 状态机 ===
+
+const STATE = {
+  IDLE: 'IDLE',
+  RECORDING_GLISSANDO: 'RECORDING_GLISSANDO',
+  RECORDING_STABLE: 'RECORDING_STABLE',
+  LISTENING: 'LISTENING',         // 共振对齐
+  LOCKED: 'LOCKED',
+  PLAYING: 'PLAYING',
+  FUSED: 'FUSED',
+  CHOOSE_MELODY: 'CHOOSE_MELODY',  // 跟唱
+  COUNTDOWN: 'COUNTDOWN',
+  SINGING: 'SINGING',
+  RESULT: 'RESULT',
+};
+
+let currentState = STATE.IDLE;
+let currentMode = 'glissando';  // glissando | cruise | resonance | follow
+
+function setState(newState) {
+  console.log(`state: ${currentState} → ${newState}`);
+  currentState = newState;
+  updateUI();
+}
+
+function updateUI() {
+  const primary = document.getElementById('primary-btn');
+  const secondary = document.getElementById('secondary-btn');
+  const modeReadout = document.getElementById('mode-readout');
+
+  // 简化版：先让按钮逻辑跑通
+  switch (currentState) {
+    case STATE.IDLE:
+      primary.hidden = false;
+      secondary.hidden = true;
+      primary.textContent = '▶ 开始';
+      break;
+    case STATE.RECORDING_GLISSANDO:
+    case STATE.RECORDING_STABLE:
+    case STATE.LISTENING:
+    case STATE.LOCKED:
+    case STATE.PLAYING:
+    case STATE.SINGING:
+    case STATE.COUNTDOWN:
+      primary.hidden = true;
+      secondary.hidden = false;
+      secondary.textContent = '停止';
+      break;
+    case STATE.FUSED:
+      primary.hidden = true;
+      secondary.hidden = false;
+      secondary.textContent = '停止';
+      break;
+    case STATE.RESULT:
+      primary.hidden = false;
+      secondary.hidden = true;
+      primary.textContent = '再来一次';
+      break;
+  }
+}
+
+// === SECTION 11: UI 控件 ===
+
+function setupTabs() {
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      if (currentState !== STATE.IDLE) {
+        showError('请先停止当前练习再切换模式');
+        return;
+      }
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentMode = tab.dataset.mode;
+      onModeChange();
+    });
+  });
+}
+
+function onModeChange() {
+  // 重置可视化
+  pitchHistory.length = 0;
+  viz.clear();
+  currentNoteEl.textContent = '—';
+  // 模式标签在 readout 显示
+  const labels = { glissando: '引擎滑音', cruise: '直线巡航', resonance: '共振对齐', follow: '跟唱' };
+  document.getElementById('mode-readout').textContent = labels[currentMode];
+}
+
+function showError(msg) {
+  const banner = document.getElementById('error-banner');
+  banner.textContent = msg;
+  banner.hidden = false;
+  setTimeout(() => { banner.hidden = true; }, 4000);
+}
+
+// === SECTION 12: 初始化 ===
+
+let engine, viz, currentNoteEl, levelFill, pitchHistory;
+
 if (typeof document !== 'undefined') {
   const onReady = () => {
-    const engine = new PitchEngine();
-    const viz = new Visualizer(document.getElementById('canvas'));
-    const currentNoteEl = document.getElementById('current-note');
-    const levelFill = document.getElementById('level-fill');
-    const pitchHistory = [];  // 最近 5 秒 = 100 帧
+    engine = new PitchEngine();
+    viz = new Visualizer(document.getElementById('canvas'));
+    currentNoteEl = document.getElementById('current-note');
+    levelFill = document.getElementById('level-fill');
+    pitchHistory = [];
 
     engine.onPitch = (freq) => {
-      const cents = freq ? freqToCents(freq, 440) : null;  // 相对 A4
+      const cents = freq ? freqToCents(freq, 440) : null;
       pitchHistory.push(cents);
       if (pitchHistory.length > 100) pitchHistory.shift();
       currentNoteEl.textContent = freq ? freqToNoteName(freq) : '—';
@@ -301,20 +401,23 @@ if (typeof document !== 'undefined') {
     renderLoop();
 
     document.getElementById('primary-btn').addEventListener('click', async () => {
-      try {
-        await engine.start();
-        document.getElementById('primary-btn').textContent = '运行中…';
-      } catch (e) {
-        showError('麦克风启动失败：' + e.message);
+      if (currentState === STATE.IDLE) {
+        try {
+          await engine.start();
+          onPrimaryStart();
+        } catch (e) {
+          showError('麦克风启动失败：' + e.message);
+        }
       }
     });
 
-    function showError(msg) {
-      const banner = document.getElementById('error-banner');
-      banner.textContent = msg;
-      banner.hidden = false;
-    }
+    document.getElementById('secondary-btn').addEventListener('click', () => {
+      engine.stop();
+      setState(STATE.IDLE);
+    });
 
+    setupTabs();
+    onModeChange();  // 初始化标签
     console.log('声音驾驶舱已加载');
   };
   if (document.readyState === 'loading') {
@@ -322,4 +425,9 @@ if (typeof document !== 'undefined') {
   } else {
     onReady();
   }
+}
+
+function onPrimaryStart() {
+  // 占位：模式逻辑在后续任务中实现
+  setState(STATE.RECORDING_GLISSANDO);
 }

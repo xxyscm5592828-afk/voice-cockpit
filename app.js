@@ -169,9 +169,42 @@ class PitchEngine {
   }
 }
 
-// 错误处理 stub - 在 Task 11 中填充真实实现
-function watchSilence() {}
-function clearSilenceWatch() {}
+// === SECTION 13: 错误处理 ===
+
+function checkBrowserSupport() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showError('您的浏览器不支持麦克风访问，请用 Chrome / Edge / Safari 最新版');
+    document.getElementById('primary-btn').disabled = true;
+    return false;
+  }
+  if (!window.AudioContext && !window.webkitAudioContext) {
+    showError('您的浏览器不支持 Web Audio，请用 Chrome / Edge / Safari 最新版');
+    document.getElementById('primary-btn').disabled = true;
+    return false;
+  }
+  return true;
+}
+
+function handlePermissionError(err) {
+  const msg = err.name === 'NotAllowedError'
+    ? '麦克风权限被拒绝。请在浏览器设置中允许本网站使用麦克风。'
+    : '麦克风启动失败：' + (err.message || err.name);
+  showError(msg);
+}
+
+let silenceTimer = null;
+function watchSilence() {
+  if (silenceTimer) clearTimeout(silenceTimer);
+  silenceTimer = setTimeout(() => {
+    if (currentState === STATE.RECORDING_GLISSANDO || currentState === STATE.RECORDING_STABLE || currentState === STATE.LISTENING) {
+      showError('听不清，请再发一次');
+    }
+  }, 3000);
+}
+
+function clearSilenceWatch() {
+  if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+}
 
 // === SECTION 4: Canvas 绘制工具 ===
 
@@ -801,6 +834,7 @@ let engine, viz, currentNoteEl, levelFill, pitchHistory;
 
 if (typeof document !== 'undefined') {
   const onReady = () => {
+    if (!checkBrowserSupport()) return;
     engine = new PitchEngine();
     viz = new Visualizer(document.getElementById('canvas'));
     currentNoteEl = document.getElementById('current-note');
@@ -833,8 +867,12 @@ if (typeof document !== 'undefined') {
           await engine.start();
           onPrimaryStart();
         } catch (e) {
-          showError('麦克风启动失败：' + e.message);
+          handlePermissionError(e);
         }
+      } else if (currentState === STATE.RESULT) {
+        // 再来一次
+        setState(STATE.IDLE);
+        onModeChange();
       }
     });
 

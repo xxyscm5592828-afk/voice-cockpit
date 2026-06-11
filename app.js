@@ -291,13 +291,6 @@ function startGlissando() {
   };
 }
 
-// --- 模式 3/4 占位（待 Task 9/10 替换）---
-function startResonance() {
-  setState(STATE.IDLE);
-  showError('共振对齐模式尚未实现（等待 Task 9）');
-  engine.stop();
-}
-
 function startFollow() {
   setState(STATE.IDLE);
   showError('跟唱模式尚未实现（等待 Task 10）');
@@ -332,6 +325,161 @@ function startCruise() {
       document.getElementById('stability').textContent = Math.round(stab * 100) + '%';
     }
   };
+}
+
+// === SECTION 8: 模式 3 - 共振对齐 ===
+
+let resonanceLockedFreq = null;
+let resonanceOsc = null;
+let resonanceGain = null;
+let resonanceAudioCtx = null;  // 提升到全局，便于停止时关闭
+let resonanceStartTime = 0;
+let resonanceSamples = [];  // {t, userFreq, refFreq}
+
+function startResonance() {
+  setState(STATE.LISTENING);
+  resonanceSamples = [];
+  const modeReadout = document.getElementById('mode-readout');
+  modeReadout.textContent = '请发一个稳定的「啊」';
+  resonanceLockedFreq = null;
+
+  // 检测音高稳定 1 秒 → LOCKED
+  const stableWindow = [];  // 最近的 cents 偏离
+  const targetWindow = 100;  // cents
+  engine.onPitch = (freq) => {
+    if (!freq) {
+      stableWindow.length = 0;
+      return;
+    }
+    const cents = freqToCents(freq, 440);  // 用 A4 作临时参考
+    stableWindow.push(cents);
+    if (stableWindow.length > 20) stableWindow.shift();
+    if (stableWindow.length >= 20) {
+      const std = (() => {
+        const mean = stableWindow.reduce((a, b) => a + b, 0) / stableWindow.length;
+        const v = stableWindow.reduce((a, b) => a + (b - mean) ** 2, 0) / stableWindow.length;
+        return Math.sqrt(v);
+      })();
+      if (std < 30) {
+        // 稳定了！锁定当前频率
+        const avgFreq = noteNumberToFreq(freqToNoteNumber(freq));
+        resonanceLockedFreq = avgFreq;
+        onResonanceLocked();
+      }
+    }
+  };
+}
+
+function onResonanceLocked() {
+  setState(STATE.LOCKED);
+  document.getElementById('mode-readout').textContent =
+    `已锁定 ${freqToNoteName(resonanceLockedFreq)} @ ${resonanceLockedFreq.toFixed(1)}Hz`;
+
+  setTimeout(() => {
+    setState(STATE.PLAYING);
+    startResonanceGlissando();
+  }, 1200);
+}
+
+function startResonanceGlissando() {
+  const startFreq = resonanceLockedFreq * Math.pow(2, -3 / 12);  // 低 3 个半音
+  const endFreq = resonanceLockedFreq;
+  const duration = 3.0;  // 秒
+
+  // 启动参考音
+  resonanceAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  resonanceOsc = resonanceAudioCtx.createOscillator();
+  resonanceGain = resonanceAudioCtx.createGain();
+  resonanceOsc.type = 'sine';
+  resonanceOsc.frequency.setValueAtTime(startFreq, resonanceAudioCtx.currentTime);
+  resonanceOsc.frequency.linearRampToValueAtTime(endFreq, resonanceAudioCtx.currentTime + duration);
+  resonanceGain.gain.setValueAtTime(0, resonanceAudioCtx.currentTime);
+  resonanceGain.gain.linearRampToValueAtTime(CONFIG.REFERENCE_GAIN, resonanceAudioCtx.currentTime + 0.05);
+  resonanceGain.gain.setValueAtTime(CONFIG.REFERENCE_GAIN, resonanceAudioCtx.currentTime + duration);
+  resonanceGain.gain.linearRampToValueAtTime(0, resonanceAudioCtx.currentTime + duration + 0.5);
+  resonanceOsc.connect(resonanceGain).connect(resonanceAudioCtx.destination);
+  resonanceOsc.start();
+  resonanceOsc.stop(resonanceAudioCtx.currentTime + duration + 0.6);
+
+  // 收集样本 + 重写 onPitch 记录用户音高
+  resonanceStartTime = performance.now();
+  resonanceSamples = [];
+  const t0 = resonanceStartTime;
+  engine.onPitch = (freq) => {
+    const t = (performance.now() - t0) / 1000;
+    resonanceSamples.push({ t, userFreq: freq, refFreq: startFreq + (endFreq - startFreq) * Math.min(1, t / duration) });
+    currentNoteEl.textContent = freq ? freqToNoteName(freq) : '—';
+  };
+
+  // 结束
+  setTimeout(() => {
+    setState(STATE.FUSED);
+    document.getElementById('mode-readout').textContent = '感受到了吗？那就是「准」的感觉';
+  }, (duration + 0.6) * 1000);
+}
+
+// 在 renderLoop 中画共振对齐：x = 时间 0~3.5s, y = 频率
+function renderResonance() {
+  if (currentMode !== 'resonance') return;
+  if (![STATE.LOCKED, STATE.PLAYING, STATE.FUSED].includes(currentState)) return;
+  const t0 = resonanceStartTime || performance.now();
+  const tNow = (performance.now() - t0) / 1000;
+  const xMax = 3.5;
+  const yMin = 200, yMax = 600;
+  viz.clear();
+  viz.drawGrid(yMin, yMax, (v) => v.toFixed(0) + 'Hz');
+
+  // 画参考曲线（用 resample 至 xMax）
+  const refSamples = [];
+  for (let i = 0; i <= 50; i++) {
+    const t = (i / 50) * xMax;
+    if (t > tNow + 0.2) break;
+    const startFreq = resonanceLockedFreq * Math.pow(2, -3 / 12);
+    const endFreq = resonanceLockedFreq;
+    const dur = 3.0;
+    const refFreq = startFreq + (endFreq - startFreq) * Math.min(1, t / dur);
+    refSamples.push(t / xMax, refFreq);
+  }
+  // 用户曲线
+  const userXs = [], userYs = [];
+  for (const s of resonanceSamples) {
+    if (s.t > xMax) break;
+    if (s.userFreq) {
+      userXs.push(s.t / xMax);
+      userYs.push(s.userFreq);
+    }
+  }
+  if (userXs.length > 1) {
+    // 用 Visualizer 的 drawCurve，但它是按数组顺序画，这里要按 x 比例画
+    viz.ctx.strokeStyle = COLORS.USER;
+    viz.ctx.lineWidth = 2.5;
+    viz.ctx.beginPath();
+    for (let i = 0; i < userXs.length; i++) {
+      const x = userXs[i] * viz.w;
+      const yNorm = (userYs[i] - yMin) / (yMax - yMin);
+      const y = viz.h - Math.max(0, Math.min(1, yNorm)) * viz.h;
+      if (i === 0) viz.ctx.moveTo(x, y);
+      else viz.ctx.lineTo(x, y);
+    }
+    viz.ctx.stroke();
+  }
+  if (refSamples.length > 1) {
+    viz.ctx.strokeStyle = COLORS.REFERENCE;
+    viz.ctx.lineWidth = 2.5;
+    viz.ctx.beginPath();
+    for (let i = 0; i < refSamples.length; i += 2) {
+      const x = refSamples[i] * viz.w;
+      const yNorm = (refSamples[i + 1] - yMin) / (yMax - yMin);
+      const y = viz.h - Math.max(0, Math.min(1, yNorm)) * viz.h;
+      if (i === 0) viz.ctx.moveTo(x, y);
+      else viz.ctx.lineTo(x, y);
+    }
+    viz.ctx.stroke();
+  }
+  // 融合点（在 x = 3/3.5）
+  if (currentState === STATE.FUSED) {
+    viz.drawMarker(3.0 / 3.5, resonanceLockedFreq, yMin, yMax, COLORS.FUSION, 10);
+  }
 }
 
 // === SECTION 10: 状态机 ===
@@ -456,6 +604,7 @@ if (typeof document !== 'undefined') {
       viz.clear();
       viz.drawGrid(-1200, 1200, (v) => (v >= 0 ? '+' : '') + Math.round(v) + '¢');
       viz.drawCurve(pitchHistory, -1200, 1200, COLORS.USER);
+      renderResonance();
       requestAnimationFrame(renderLoop);
     }
     renderLoop();
@@ -473,6 +622,14 @@ if (typeof document !== 'undefined') {
 
     document.getElementById('secondary-btn').addEventListener('click', () => {
       engine.stop();
+      if (resonanceOsc) {
+        try { resonanceOsc.stop(); } catch (e) {}
+        resonanceOsc = null;
+      }
+      if (resonanceAudioCtx) {
+        resonanceAudioCtx.close();
+        resonanceAudioCtx = null;
+      }
       setState(STATE.IDLE);
     });
 

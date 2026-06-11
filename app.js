@@ -173,19 +173,132 @@ class PitchEngine {
 function watchSilence() {}
 function clearSilenceWatch() {}
 
+// === SECTION 4: Canvas 绘制工具 ===
+
+class Visualizer {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.w = 0;
+    this.h = 0;
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+  }
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = this.canvas.getBoundingClientRect();
+    this.canvas.width = Math.floor(rect.width * dpr);
+    this.canvas.height = Math.floor(rect.height * dpr);
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);  // 重置
+    this.ctx.scale(dpr, dpr);
+    this.w = rect.width;
+    this.h = rect.height;
+  }
+
+  clear() {
+    this.ctx.fillStyle = '#0f172a';
+    this.ctx.fillRect(0, 0, this.w, this.h);
+  }
+
+  // 画水平网格 + y 轴刻度标签
+  drawGrid(yMin, yMax, yFormatter) {
+    this.ctx.strokeStyle = COLORS.GRID;
+    this.ctx.lineWidth = 1;
+    this.ctx.fillStyle = COLORS.TEXT_DIM;
+    this.ctx.font = '12px sans-serif';
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'middle';
+    for (let i = 0; i <= 4; i++) {
+      const y = (this.h / 4) * i;
+      this.ctx.beginPath();
+      this.ctx.moveTo(0, y);
+      this.ctx.lineTo(this.w, y);
+      this.ctx.stroke();
+      const yVal = yMax - (yMax - yMin) * (i / 4);
+      this.ctx.fillText(yFormatter(yVal), 6, y);
+    }
+  }
+
+  // 在 y 值处画水平虚线
+  drawTargetLine(yValue, yMin, yMax, color = COLORS.TARGET, label = '') {
+    const y = this.h - (yValue - yMin) / (yMax - yMin) * this.h;
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = 1;
+    this.ctx.setLineDash([6, 4]);
+    this.ctx.beginPath();
+    this.ctx.moveTo(0, y);
+    this.ctx.lineTo(this.w, y);
+    this.ctx.stroke();
+    this.ctx.setLineDash([]);
+    if (label) {
+      this.ctx.fillStyle = color;
+      this.ctx.fillText(label, this.w - 60, y - 8);
+    }
+  }
+
+  // 画最近 N 个采样点
+  drawCurve(samples, yMin, yMax, color = COLORS.USER, lineWidth = 2.5) {
+    if (samples.length < 2) return;
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = lineWidth;
+    this.ctx.lineJoin = 'round';
+    this.ctx.beginPath();
+    const n = samples.length;
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * this.w;
+      const yNorm = (samples[i] - yMin) / (yMax - yMin);
+      const y = this.h - Math.max(0, Math.min(1, yNorm)) * this.h;
+      if (i === 0) this.ctx.moveTo(x, y);
+      else this.ctx.lineTo(x, y);
+    }
+    this.ctx.stroke();
+  }
+
+  // 在指定位置画一个点（用于标记融合点等）
+  drawMarker(xRatio, yValue, yMin, yMax, color = COLORS.FUSION, radius = 8) {
+    const x = xRatio * this.w;
+    const yNorm = (yValue - yMin) / (yMax - yMin);
+    const y = this.h - Math.max(0, Math.min(1, yNorm)) * this.h;
+    // 光晕
+    const gradient = this.ctx.createRadialGradient(x, y, 0, x, y, radius * 3);
+    gradient.addColorStop(0, color + 'cc');
+    gradient.addColorStop(1, color + '00');
+    this.ctx.fillStyle = gradient;
+    this.ctx.fillRect(x - radius * 3, y - radius * 3, radius * 6, radius * 6);
+    // 实心圆
+    this.ctx.fillStyle = color;
+    this.ctx.beginPath();
+    this.ctx.arc(x, y, radius, 0, Math.PI * 2);
+    this.ctx.fill();
+  }
+}
+
 if (typeof document !== 'undefined') {
   const onReady = () => {
     const engine = new PitchEngine();
+    const viz = new Visualizer(document.getElementById('canvas'));
     const currentNoteEl = document.getElementById('current-note');
     const levelFill = document.getElementById('level-fill');
+    const pitchHistory = [];  // 最近 5 秒 = 100 帧
 
     engine.onPitch = (freq) => {
+      const cents = freq ? freqToCents(freq, 440) : null;  // 相对 A4
+      pitchHistory.push(cents);
+      if (pitchHistory.length > 100) pitchHistory.shift();
       currentNoteEl.textContent = freq ? freqToNoteName(freq) : '—';
     };
     engine.onLevel = (rms) => {
-      // rms 通常 0-0.5，放大显示
       levelFill.style.width = Math.min(100, rms * 400) + '%';
     };
+
+    function renderLoop() {
+      viz.clear();
+      viz.drawGrid(-1200, 1200, (v) => (v >= 0 ? '+' : '') + Math.round(v) + '¢');
+      viz.drawCurve(pitchHistory, -1200, 1200, COLORS.USER);
+      requestAnimationFrame(renderLoop);
+    }
+    renderLoop();
 
     document.getElementById('primary-btn').addEventListener('click', async () => {
       try {

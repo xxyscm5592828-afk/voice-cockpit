@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>声音驾驶舱</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>🎵 声音驾驶舱</h1>
+  </header>
+
+  <nav class="mode-tabs" role="tablist">
+    <button class="tab active" data-mode="glissando" role="tab">引擎滑音</button>
+    <button class="tab" data-mode="cruise" role="tab">直线巡航</button>
+    <button class="tab" data-mode="resonance" role="tab">共振对齐</button>
+    <button class="tab" data-mode="follow" role="tab">跟唱</button>
+  </nav>
+
+  <main class="dashboard">
+    <canvas id="canvas" width="800" height="400"></canvas>
+
+    <div class="readout">
+      <span class="readout-item">当前音: <strong id="current-note">—</strong></span>
+      <span class="readout-item" id="mode-readout">—</span>
+    </div>
+    <div class="level-meter">
+      <span>音量:</span>
+      <div class="level-bar"><div id="level-fill"></div></div>
+    </div>
+  </main>
+
+  <footer class="controls">
+    <button id="primary-btn" class="primary">▶ 开始</button>
+    <button id="secondary-btn" class="secondary" hidden>停止</button>
+  </footer>
+
+  <div id="error-banner" class="error-banner" hidden></div>
+
+  <script src="vendor/pitchy.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

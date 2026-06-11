@@ -304,6 +304,36 @@ function startFollow() {
   engine.stop();
 }
 
+// === SECTION 7: 模式 2 - 直线巡航 ===
+
+let cruiseTargetFreq = 440;  // 默认 A4
+let cruiseHistory = [];      // cents 偏离历史（最近 2 秒 = 40 帧）
+
+function startCruise() {
+  setState(STATE.RECORDING_STABLE);
+  cruiseHistory = [];
+  const modeReadout = document.getElementById('mode-readout');
+  // 临时把「模式相关数值」改为显示目标音 + 偏离
+  modeReadout.innerHTML = `目标: A4 | 偏离: <strong id="deviation">—</strong> | 稳定度: <strong id="stability">—</strong>`;
+  // 暂停 global onPitch，重写
+  engine.onPitch = (freq) => {
+    if (!freq) {
+      document.getElementById('deviation').textContent = '—';
+      cruiseHistory.push(null);
+    } else {
+      const cents = freqToCents(freq, cruiseTargetFreq);
+      document.getElementById('deviation').textContent = (cents >= 0 ? '+' : '') + cents.toFixed(0) + ' cents';
+      cruiseHistory.push(cents);
+    }
+    if (cruiseHistory.length > 40) cruiseHistory.shift();
+    const valid = cruiseHistory.filter(x => x !== null);
+    if (valid.length > 1) {
+      const stab = calcStability(valid);
+      document.getElementById('stability').textContent = Math.round(stab * 100) + '%';
+    }
+  };
+}
+
 // === SECTION 10: 状态机 ===
 
 const STATE = {

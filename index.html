@@ -2,16 +2,15 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>声音驾驶舱</title>
-  <link rel="stylesheet" href="style.css?v=35">
+  <link rel="stylesheet" href="style.css?v=40">
 </head>
 <body>
   <header class="app-header">
-    <span class="app-logo" aria-hidden="true">🎵</span>
     <div>
-      <h1>声音驾驶舱</h1>
-      <p class="app-subtitle">VOICE COCKPIT</p>
+      <h1>NOVA声音驾校</h1>
+      <p class="app-subtitle">专业纠正跑调 五音不全救星</p>
     </div>
   </header>
 
@@ -20,9 +19,10 @@
       <div class="course-progress-track">
         <div class="course-progress-fill" id="course-progress-fill"></div>
       </div>
-      <span class="course-progress-text" id="course-progress-text">1/5</span>
+      <span class="course-progress-text" id="course-progress-text">第 1 关 / 共 5 关</span>
     </div>
-    <h2 class="course-step-title" id="course-step-title">第 1 步：听觉训练</h2>
+    <div class="course-steps-list" id="course-steps-list"></div>
+    <h2 class="course-step-title" id="course-step-title">第 1 关：听觉训练</h2>
     <p class="course-step-desc" id="course-step-desc">先学会听出两个音的差别</p>
   </div>
 
@@ -99,7 +99,18 @@
 
   <div id="error-banner" class="error-banner" hidden></div>
 
+  <!-- 使用指引弹窗（打开页面即显示） -->
+  <div class="guide-modal" id="guide-modal">
+    <div class="guide-card">
+      <img class="guide-avatar" src="assets/principal.png" alt="李校长头像">
+      <h2>开始前，请先戴上耳机</h2>
+      <p>建议佩戴<b>带麦克风的耳机</b>：耳机让参考音听得更准，麦克风让音高识别更灵敏，纠音效果最好。</p>
+      <p class="guide-tip">本课程共 5 关，通过一关会自动解锁下一关。</p>
+      <button id="guide-start-btn" class="primary">知道了，开始</button>
+    </div>
+  </div>
+
   <script src="vendor/pitchy.min.js"></script>
-  <script type="module" src="app.js?v=35"></script>
+  <script type="module" src="app.js?v=40"></script>
 </body>
 </html>

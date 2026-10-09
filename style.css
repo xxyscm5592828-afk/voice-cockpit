@@ -3,6 +3,9 @@
 /* [hidden] 强制隐藏，覆盖 .stats-modal 等 display: flex 规则 */
 [hidden] { display: none !important; }
 
+/* 触屏：按钮禁用双击缩放，点按响应更快 */
+button, .tab { touch-action: manipulation; }
+
 :root {
   /* 背景与面板 */
   --bg: #060a14;
@@ -31,6 +34,7 @@
 
 /* 深空背景 + 网格 + 光晕 */
 html {
+  -webkit-tap-highlight-color: transparent;
   background-color: var(--bg);
   background-image:
     radial-gradient(1100px 560px at 50% -12%, rgba(34, 211, 238, 0.10), transparent 62%),
@@ -47,6 +51,7 @@ body {
   background: transparent;
   color: var(--text);
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   padding: 20px 16px 32px;
@@ -62,19 +67,6 @@ body {
   align-items: center;
   gap: 14px;
   padding: 2px;
-}
-.app-logo {
-  width: 46px;
-  height: 46px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  border-radius: 14px;
-  background: linear-gradient(160deg, rgba(34, 211, 238, 0.24), rgba(59, 130, 246, 0.10));
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 0 20px rgba(34, 211, 238, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 .app-header h1 {
   font-size: 22px;
@@ -112,7 +104,6 @@ body {
   font-family: inherit;
   transition: all 0.2s;
 }
-.tab:hover { color: var(--text); border-color: var(--border-strong); }
 .tab.active {
   background: linear-gradient(135deg, rgba(34, 211, 238, 0.22), rgba(37, 99, 235, 0.22));
   border-color: var(--primary);
@@ -208,20 +199,10 @@ button.primary {
   color: #04121c;
   box-shadow: 0 0 22px rgba(34, 211, 238, 0.35), 0 8px 22px rgba(0, 0, 0, 0.4);
 }
-button.primary:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 0 32px rgba(34, 211, 238, 0.55), 0 12px 26px rgba(0, 0, 0, 0.45);
-}
-button.primary:active:not(:disabled) { transform: translateY(0); }
 button.secondary {
   background: rgba(30, 42, 64, 0.6);
   color: var(--text);
   border-color: var(--border-strong);
-}
-button.secondary:hover:not(:disabled) {
-  border-color: var(--primary);
-  color: #ffffff;
-  box-shadow: 0 0 18px rgba(34, 211, 238, 0.25);
 }
 button:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; transform: none; }
 
@@ -327,10 +308,62 @@ button:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; transfor
   font-family: inherit;
   transition: all 0.2s;
 }
-.stats-btn:hover {
-  border-color: var(--primary);
-  box-shadow: 0 0 18px rgba(34, 211, 238, 0.3);
-  transform: translateY(-1px);
+/* === 使用指引弹窗（打开页面即显示） === */
+.guide-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 6, 14, 0.78);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 110;
+  padding: 20px;
+}
+.guide-card {
+  background: linear-gradient(180deg, rgba(20, 30, 50, 0.96), rgba(12, 19, 33, 0.98));
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  padding: 28px 24px;
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.guide-avatar {
+  width: 130px;
+  height: auto;
+  display: block;
+  filter: drop-shadow(0 10px 26px rgba(34, 211, 238, 0.32));
+}
+.guide-card h2 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.04em;
+}
+.guide-card p {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--text-dim);
+}
+.guide-card p b {
+  color: var(--primary);
+  font-weight: 600;
+}
+.guide-card .guide-tip {
+  font-size: 12.5px;
+  line-height: 1.6;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(34, 211, 238, 0.10);
+  border: 1px solid rgba(34, 211, 238, 0.28);
+  color: #a5f3fc;
 }
 
 .stats-modal {
@@ -522,12 +555,6 @@ button:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; transfor
   transition: all 0.15s;
   min-width: 138px;
 }
-.et-play-btn:hover:not(:disabled), .et-answer-btn:hover:not(:disabled) {
-  border-color: var(--primary);
-  background: rgba(34, 211, 238, 0.12);
-  box-shadow: 0 0 20px rgba(34, 211, 238, 0.25);
-  transform: translateY(-1px);
-}
 .et-play-btn:disabled, .et-answer-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
@@ -576,6 +603,30 @@ button:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; transfor
   font-variant-numeric: tabular-nums;
   min-width: 42px;
   text-align: right;
+}
+.course-steps-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.course-step-chip {
+  font-size: 12.5px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(16, 24, 40, 0.6);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.course-step-chip.done {
+  border-color: rgba(52, 211, 153, 0.5);
+  color: var(--accent);
+}
+.course-step-chip.active {
+  border-color: var(--primary);
+  background: rgba(34, 211, 238, 0.14);
+  color: #a5f3fc;
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.28);
 }
 .course-step-title {
   font-size: 21px;
@@ -650,22 +701,83 @@ button:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; transfor
   box-shadow: 0 0 22px rgba(34, 211, 238, 0.35);
   transition: transform 0.15s ease, box-shadow 0.2s ease;
 }
-.pass-card button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 0 32px rgba(34, 211, 238, 0.55);
+/* === 指针设备生效的 hover 反馈（避免触屏点按后 hover 态粘滞） === */
+@media (hover: hover) and (pointer: fine) {
+  .tab:hover { color: var(--text); border-color: var(--border-strong); }
+  button.primary:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 0 32px rgba(34, 211, 238, 0.55), 0 12px 26px rgba(0, 0, 0, 0.45);
+  }
+  button.primary:active:not(:disabled) { transform: translateY(0); }
+  button.secondary:hover:not(:disabled) {
+    border-color: var(--primary);
+    color: #ffffff;
+    box-shadow: 0 0 18px rgba(34, 211, 238, 0.25);
+  }
+  .stats-btn:hover {
+    border-color: var(--primary);
+    box-shadow: 0 0 18px rgba(34, 211, 238, 0.3);
+    transform: translateY(-1px);
+  }
+  .et-play-btn:hover:not(:disabled), .et-answer-btn:hover:not(:disabled) {
+    border-color: var(--primary);
+    background: rgba(34, 211, 238, 0.12);
+    box-shadow: 0 0 20px rgba(34, 211, 238, 0.25);
+    transform: translateY(-1px);
+  }
+  .pass-card button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 32px rgba(34, 211, 238, 0.55);
+  }
+}
+
+/* 触屏：用按压缩放替代 hover 反馈 */
+@media (hover: none) {
+  button:not(:disabled):active { transform: scale(0.96); }
 }
 
 @media (max-width: 600px) {
-  body { padding: 12px 12px 24px; gap: 12px; }
+  /* 底部留出 iPhone Home 指示条的安全区 */
+  body {
+    padding: 12px 12px calc(24px + env(safe-area-inset-bottom));
+    gap: 12px;
+  }
   .app-header h1 { font-size: 19px; }
   .readout { font-size: 14px; gap: 12px; }
   .readout-item strong { font-size: 16px; }
-  button.primary, button.secondary { padding: 12px 24px; font-size: 16px; }
+  /* 触控目标不小于 40px，避免误触 */
+  button.primary, button.secondary { padding: 13px 26px; font-size: 16px; }
+  .tab { padding: 10px 16px; font-size: 13.5px; }
   .tuner { flex-direction: column; align-items: stretch; gap: 10px; }
   .tuner-note { font-size: 28px; }
-  .et-play-btn, .et-answer-btn { padding: 12px 20px; font-size: 16px; min-width: 110px; }
+  .et-play-btn, .et-answer-btn { padding: 13px 20px; font-size: 16px; min-width: 110px; }
   .course-step-title { font-size: 18px; }
-  #canvas { height: 260px; }
+  /* 关卡总览改为单行横滑，避免换行挤占正文 */
+  .course-steps-list {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .course-steps-list::-webkit-scrollbar { display: none; }
+  .course-step-chip { font-size: 12px; padding: 5px 11px; }
+  .guide-card { padding: 22px 18px; gap: 12px; }
+  .guide-avatar { width: 108px; }
+  .pass-card { padding: 26px 22px; }
+  .stats-modal-content { padding: 20px 16px; max-height: 84dvh; }
+  .stats-actions button { padding: 11px 15px; }
+  #canvas { height: 240px; }
+  /* 移动端降低毛玻璃开销，避免低端机掉帧 */
+  .dashboard {
+    background: rgba(12, 19, 32, 0.92);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+}
+
+/* 小屏（iPhone SE 等）：再压缩画布高度，让「开始」尽量落在首屏内 */
+@media (max-width: 400px) {
+  #canvas { height: 200px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

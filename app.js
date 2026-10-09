@@ -41,7 +41,7 @@ const COLORS = {
 // === 课程引导 ===
 const COURSE_STEPS = [
   { id: 'ear_training', name: '听觉训练', desc: '先学会听出两个音的差别' },
-  { id: 'resonance',    name: '共振对齐', desc: '发长音，感受参考音靠近时的共鸣感' },
+  { id: 'resonance',    name: '共震齐驱', desc: '发长音，感受参考音靠近时的共鸣感' },
   { id: 'glissando',    name: '引擎滑音', desc: '自由滑音，感受声带松紧变化' },
   { id: 'cruise',       name: '直线巡航', desc: '把音稳稳停在一个目标音上' },
   { id: 'follow',       name: '跟唱旋律', desc: '跟着旋律唱，综合应用' },
@@ -1462,7 +1462,7 @@ function onModeChange() {
   const labels = {
     glissando: '引擎滑音',
     cruise: '直线巡航',
-    resonance: '共振对齐',
+    resonance: '共震齐驱',
     follow: '跟唱',
     ear_training: '听觉训练',
   };
@@ -1516,9 +1516,10 @@ function showCurrentStep() {
     currentMode = step.id;
     const completed = courseProgress.completedSteps.length;
     fill.style.width = (completed / COURSE_STEPS.length * 100) + '%';
-    text.textContent = (currentStepIndex + 1) + '/' + COURSE_STEPS.length;
-    titleEl.textContent = `第 ${currentStepIndex + 1} 步：${step.name}`;
+    text.textContent = `第 ${currentStepIndex + 1} 关 / 共 ${COURSE_STEPS.length} 关`;
+    titleEl.textContent = `第 ${currentStepIndex + 1} 关：${step.name}`;
     descEl.textContent = step.desc;
+    renderCourseStepsList();
   }
 
   // 切换 canvas / 听觉训练面板
@@ -1616,6 +1617,21 @@ function showFreePracticeTabs() {
 function hideFreePracticeTabs() {
   const tabs = document.getElementById('free-practice-tabs');
   if (tabs) tabs.hidden = true;
+}
+
+// 关卡总览：列出全部关卡名，标记当前关与已通关
+function renderCourseStepsList() {
+  const list = document.getElementById('course-steps-list');
+  if (!list) return;
+  list.innerHTML = '';
+  COURSE_STEPS.forEach((step, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'course-step-chip'
+      + (courseProgress.completedSteps.includes(step.id) ? ' done' : '')
+      + (i === currentStepIndex ? ' active' : '');
+    chip.textContent = `${i + 1}. ${step.name}`;
+    list.appendChild(chip);
+  });
 }
 
 function checkStepPassed(mode, metrics) {
@@ -1855,6 +1871,7 @@ if (typeof document !== 'undefined') {
     }
     setupTuner();      // 调谐器 widget
     setupStatsUI();    // 成绩统计模态
+    setupGuideModal(); // 使用指引弹窗
     console.log('声音驾驶舱已加载');
   };
   if (document.readyState === 'loading') {
@@ -2071,7 +2088,7 @@ function renderStats() {
     <h3>直线巡航</h3>
     <div>练习次数：<strong>${m.cruise.sessions}</strong> · 最高稳定度：<strong>${pct(m.cruise.bestStability)}</strong></div>
     <div>累计时长：${formatDuration(m.cruise.totalDurationMs)}</div>
-    <h3>共振对齐</h3>
+    <h3>共震齐驱</h3>
     <div>练习次数：<strong>${m.resonance.sessions}</strong> · 完成次数：<strong>${m.resonance.completions || 0}</strong></div>
     <div>累计时长：${formatDuration(m.resonance.totalDurationMs)}</div>
     <h3>跟唱旋律</h3>
@@ -2158,5 +2175,14 @@ function setupStatsUI() {
       };
       reader.readAsText(file);
     });
+  }
+}
+
+// === 使用指引弹窗 ===
+function setupGuideModal() {
+  const modal = document.getElementById('guide-modal');
+  const btn = document.getElementById('guide-start-btn');
+  if (modal && btn) {
+    btn.addEventListener('click', () => { modal.hidden = true; });
   }
 }

@@ -1,5 +1,5 @@
 // =============================================================================
-// 声音驾驶舱 - 主程序
+// NOVA声音驾校 - 主程序
 // =============================================================================
 //
 // 文件分区：
@@ -1900,7 +1900,7 @@ if (typeof document !== 'undefined') {
     setupTuner();      // 调谐器 widget
     setupStatsUI();    // 成绩统计模态
     setupGuideModal(); // 使用指引弹窗
-    console.log('声音驾驶舱已加载');
+    console.log('NOVA声音驾校已加载');
   };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', onReady);

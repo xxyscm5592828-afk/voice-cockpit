@@ -610,6 +610,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; transfor
   gap: 8px;
 }
 .course-step-chip {
+  font-family: inherit;
   font-size: 12.5px;
   padding: 4px 12px;
   border-radius: 999px;
@@ -617,6 +618,7 @@ button:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; transfor
   background: rgba(16, 24, 40, 0.6);
   color: var(--text-dim);
   white-space: nowrap;
+  cursor: pointer;
 }
 .course-step-chip.done {
   border-color: rgba(52, 211, 153, 0.5);

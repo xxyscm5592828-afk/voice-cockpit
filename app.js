@@ -38,6 +38,9 @@ const COLORS = {
   TEXT_DIM: '#7c93ad',
 };
 
+// 主图区音名 Y 轴：以当前音为中心，跨度一个八度
+const NOTE_AXIS_SPAN = 12;
+
 // === 课程引导 ===
 const COURSE_STEPS = [
   { id: 'ear_training', name: '听觉训练', desc: '先学会听出两个音的差别' },
@@ -308,6 +311,9 @@ class Visualizer {
     this.waveformHeight = 60;  // 顶部音频波形区高度
     this.mainTop = 0;          // 主图区顶部 Y（波形区下方）
     this.mainHeight = 0;       // 主图区高度
+    this.axisCenter = null;    // 当前 Y 轴中心（MIDI），随当前音平滑移动
+    this.axisMin = 0;          // 当前 Y 轴下界（MIDI）
+    this.axisMax = 0;          // 当前 Y 轴上界（MIDI）
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -330,49 +336,35 @@ class Visualizer {
     this.ctx.clearRect(0, 0, this.w, this.h);
   }
 
-  // MIDI 数字 → canvas Y 坐标（在主图区内）
-  midiToY(midi, minMidi, maxMidi) {
-    const yNorm = (midi - minMidi) / (maxMidi - minMidi);
+  // 每帧更新 Y 轴：以当前音（MIDI）为中心，平滑跟随
+  updateAxis(targetMidi) {
+    if (targetMidi == null) targetMidi = this.axisCenter;
+    if (targetMidi == null) targetMidi = 69;  // 尚未检测到音高时默认以 A4 为中心
+    if (this.axisCenter == null) this.axisCenter = targetMidi;
+    else this.axisCenter += (targetMidi - this.axisCenter) * 0.2;
+    this.axisMin = this.axisCenter - NOTE_AXIS_SPAN / 2;
+    this.axisMax = this.axisCenter + NOTE_AXIS_SPAN / 2;
+  }
+
+  // MIDI 数字 → canvas Y 坐标（在当前 Y 轴范围内，超出贴边）
+  midiToY(midi) {
+    const span = this.axisMax - this.axisMin;
+    if (span <= 0) return this.mainTop + this.mainHeight / 2;
+    const yNorm = (midi - this.axisMin) / span;
     const clamped = Math.max(0, Math.min(1, yNorm));
     return this.mainTop + this.mainHeight - clamped * this.mainHeight;
   }
 
-  // 频率 → canvas Y 坐标（在主图区内）
-  freqToY(freq, yMin, yMax) {
-    const yNorm = (freq - yMin) / (yMax - yMin);
-    const clamped = Math.max(0, Math.min(1, yNorm));
-    return this.mainTop + this.mainHeight - clamped * this.mainHeight;
-  }
-
-  // 画水平网格 + y 轴刻度标签（仅在主图区）
-  drawGrid(yMin, yMax, yFormatter) {
-    this.ctx.strokeStyle = COLORS.GRID;
-    this.ctx.lineWidth = 1;
-    this.ctx.fillStyle = COLORS.TEXT_DIM;
-    this.ctx.font = '12px sans-serif';
-    this.ctx.textAlign = 'left';
-    this.ctx.textBaseline = 'middle';
-    for (let i = 0; i <= 4; i++) {
-      const y = this.mainTop + (this.mainHeight / 4) * i;
-      this.ctx.beginPath();
-      this.ctx.moveTo(0, y);
-      this.ctx.lineTo(this.w, y);
-      this.ctx.stroke();
-      const yVal = yMax - (yMax - yMin) * (i / 4);
-      this.ctx.fillText(yFormatter(yVal), 6, y);
-    }
-  }
-
-  // 在 y 值处画水平虚线（仅在主图区）
-  drawTargetLine(yValue, yMin, yMax, color = COLORS.TARGET, label = '') {
-    const yNorm = (yValue - yMin) / (yMax - yMin);
-    const y = this.mainTop + this.mainHeight - Math.max(0, Math.min(1, yNorm)) * this.mainHeight;
+  // 在指定 MIDI 音高处画水平虚线（仅在主图区）
+  drawTargetLine(midi, color = COLORS.TARGET, label = '') {
+    const sideW = 28;
+    const y = this.midiToY(midi);
     this.ctx.strokeStyle = color;
     this.ctx.lineWidth = 1;
     this.ctx.setLineDash([6, 4]);
     this.ctx.beginPath();
-    this.ctx.moveTo(0, y);
-    this.ctx.lineTo(this.w, y);
+    this.ctx.moveTo(sideW, y);
+    this.ctx.lineTo(this.w - sideW, y);
     this.ctx.stroke();
     this.ctx.setLineDash([]);
     if (label) {
@@ -381,29 +373,10 @@ class Visualizer {
     }
   }
 
-  // 画最近 N 个采样点（仅在主图区）
-  drawCurve(samples, yMin, yMax, color = COLORS.USER, lineWidth = 2.5) {
-    if (samples.length < 2) return;
-    this.ctx.strokeStyle = color;
-    this.ctx.lineWidth = lineWidth;
-    this.ctx.lineJoin = 'round';
-    this.ctx.beginPath();
-    const n = samples.length;
-    for (let i = 0; i < n; i++) {
-      if (samples[i] == null) continue;
-      const x = (i / (n - 1)) * this.w;
-      const yNorm = (samples[i] - yMin) / (yMax - yMin);
-      const y = this.mainTop + this.mainHeight - Math.max(0, Math.min(1, yNorm)) * this.mainHeight;
-      if (i === 0) this.ctx.moveTo(x, y);
-      else this.ctx.lineTo(x, y);
-    }
-    this.ctx.stroke();
-  }
-
-  // 用 MIDI 数字画 Y 轴音名网格（左右两侧都画音名，仅在主图区）
-  drawNoteGrid(minNote, maxNote) {
-    const minMidi = noteNameToMidi(minNote);
-    const maxMidi = noteNameToMidi(maxNote);
+  // 用当前 Y 轴范围画音名网格（左右两侧都画音名，仅在主图区）
+  drawNoteGrid() {
+    const minMidi = Math.ceil(this.axisMin);
+    const maxMidi = Math.floor(this.axisMax);
     this.ctx.strokeStyle = COLORS.GRID;
     this.ctx.lineWidth = 1;
     this.ctx.fillStyle = COLORS.TEXT_DIM;
@@ -411,7 +384,7 @@ class Visualizer {
     this.ctx.textBaseline = 'middle';
     const sideW = 28;  // 两侧音名标签占的宽度
     for (let m = minMidi; m <= maxMidi; m++) {
-      const y = this.midiToY(m, minMidi, maxMidi);
+      const y = this.midiToY(m);
       this.ctx.beginPath();
       this.ctx.moveTo(sideW, y);
       this.ctx.lineTo(this.w - sideW, y);
@@ -428,7 +401,7 @@ class Visualizer {
   }
 
   // 用 MIDI 数字画曲线（仅在主图区）
-  drawCurveByMidi(samples, minMidi, maxMidi, color = COLORS.USER, lineWidth = 2.5) {
+  drawCurveByMidi(samples, color = COLORS.USER, lineWidth = 2.5) {
     if (samples.length < 2) return;
     this.ctx.strokeStyle = color;
     this.ctx.lineWidth = lineWidth;
@@ -439,7 +412,7 @@ class Visualizer {
     for (let i = 0; i < n; i++) {
       if (samples[i] == null) continue;
       const x = sideW + (i / (n - 1)) * (this.w - 2 * sideW);
-      const y = this.midiToY(samples[i], minMidi, maxMidi);
+      const y = this.midiToY(samples[i]);
       if (i === 0) this.ctx.moveTo(x, y);
       else this.ctx.lineTo(x, y);
     }
@@ -488,10 +461,11 @@ class Visualizer {
     this.ctx.fill();
   }
 
-  // 在指定位置画一个点（用于标记融合点等，xRatio 0-1, yValue 是频率）
-  drawMarker(xRatio, yValue, yMin, yMax, color = COLORS.FUSION, radius = 8) {
-    const x = xRatio * this.w;
-    const y = this.freqToY(yValue, yMin, yMax);
+  // 在指定位置画一个点（用于标记融合点等，xRatio 0-1, midi 是音高）
+  drawMarker(xRatio, midi, color = COLORS.FUSION, radius = 8) {
+    const sideW = 28;
+    const x = sideW + xRatio * (this.w - 2 * sideW);
+    const y = this.midiToY(midi);
     // 光晕
     const gradient = this.ctx.createRadialGradient(x, y, 0, x, y, radius * 3);
     gradient.addColorStop(0, color + 'cc');
@@ -542,10 +516,9 @@ class Visualizer {
   }
 
   // 当前音高球：实心球 + 垂直延伸线 + 大字音名（截图风格）
-  drawPitchBall(midi, minMidi, maxMidi, noteName, color = COLORS.REFERENCE) {
+  drawPitchBall(midi, noteName, color = COLORS.REFERENCE, x = this.w - 50) {
     if (midi == null) return;
-    const x = this.w - 50;
-    const y = this.midiToY(midi, minMidi, maxMidi);
+    const y = this.midiToY(midi);
     // 垂直延伸线
     this.ctx.strokeStyle = color;
     this.ctx.lineWidth = 2;
@@ -568,10 +541,10 @@ class Visualizer {
   }
 
   // 在最近半音位置画水平虚线参考线（比普通网格线更亮）
-  drawNearestSemitoneLine(midi, minMidi, maxMidi, color = '#fbbf24') {
+  drawNearestSemitoneLine(midi, color = '#fbbf24') {
     if (midi == null) return;
     const nearestMidi = Math.round(midi);
-    const y = this.midiToY(nearestMidi, minMidi, maxMidi);
+    const y = this.midiToY(nearestMidi);
     const sideW = 28;
     this.ctx.strokeStyle = color;
     this.ctx.lineWidth = 1.5;
@@ -581,6 +554,14 @@ class Visualizer {
     this.ctx.lineTo(this.w - sideW, y);
     this.ctx.stroke();
     this.ctx.setLineDash([]);
+  }
+
+  // 当前音高聚焦：最近半音虚线 + 音名球（第3关标准样式）
+  drawPitchFocus(midi, x = this.w - 50) {
+    if (midi == null) return;
+    const noteName = freqToNoteName(noteNumberToFreq(midi));
+    this.drawNearestSemitoneLine(midi);
+    this.drawPitchBall(midi, noteName, COLORS.REFERENCE, x);
   }
 }
 
@@ -793,12 +774,19 @@ function startResonance() {
   // 检测音高稳定 1 秒 → LOCKED
   const stableWindow = [];  // 最近的 cents 偏离
   const targetWindow = 100;  // cents
+  let locked = false;  // 稳定后只锁定一次，避免每帧重复触发参考音
   engine.onPitch = (freq) => {
+    if (locked) return;
     if (!freq) {
       stableWindow.length = 0;
+      currentNoteEl.textContent = '—';
       return;
     }
+    // 同步实时反馈（与其它模式一致：显示音名 + 画布曲线）
+    currentNoteEl.textContent = freqToNoteName(freq);
     const cents = freqToCents(freq, 440);  // 用 A4 作临时参考
+    pitchHistory.push(cents);
+    if (pitchHistory.length > 100) pitchHistory.shift();
     stableWindow.push(cents);
     if (stableWindow.length > 20) stableWindow.shift();
     if (stableWindow.length >= 20) {
@@ -808,6 +796,7 @@ function startResonance() {
         return Math.sqrt(v);
       })();
       if (std < 30) {
+        locked = true;
         // 稳定了！锁定当前频率
         const avgFreq = noteNumberToFreq(freqToNoteNumber(freq));
         resonanceLockedFreq = avgFreq;
@@ -866,18 +855,25 @@ function startResonanceGlissando() {
   }, (duration + 0.6) * 1000);
 }
 
-// 在 renderLoop 中画共振对齐：x = 时间 0~3.5s, y = 频率
+// 在 renderLoop 中画共振对齐：x = 时间 0~3.5s, y = 音名（动态中心）
 function renderResonance() {
   if (currentMode !== 'resonance') return;
-  if (![STATE.LOCKED, STATE.PLAYING, STATE.FUSED].includes(currentState)) return;
+  if (![STATE.LISTENING, STATE.LOCKED, STATE.PLAYING, STATE.FUSED].includes(currentState)) return;
+
+  // 未进入参考音阶段：滚动显示用户音名曲线
+  if (currentState !== STATE.PLAYING && currentState !== STATE.FUSED) {
+    viz.drawCurveByMidi(pitchHistory.map((c) => (c == null ? null : 69 + c / 100)), COLORS.USER);
+    return;
+  }
+
   const t0 = resonanceStartTime || performance.now();
   const tNow = (performance.now() - t0) / 1000;
   const xMax = 3.5;
-  const yMin = 200, yMax = 600;
-  viz.drawGrid(yMin, yMax, (v) => v.toFixed(0) + 'Hz');
+  const sideW = 28;
+  const plotX = (t) => sideW + (t / xMax) * (viz.w - 2 * sideW);
 
-  // 画参考曲线（用 resample 至 xMax）
-  const refSamples = [];
+  // 参考曲线：频率随时间线性上升，转 MIDI 后按音名轴绘制
+  const refPts = [];
   for (let i = 0; i <= 50; i++) {
     const t = (i / 50) * xMax;
     if (t > tNow + 0.2) break;
@@ -885,45 +881,42 @@ function renderResonance() {
     const endFreq = resonanceLockedFreq;
     const dur = 3.0;
     const refFreq = startFreq + (endFreq - startFreq) * Math.min(1, t / dur);
-    refSamples.push(t / xMax, refFreq);
+    refPts.push([plotX(t), viz.midiToY(freqToNoteNumber(refFreq))]);
   }
-  // 用户曲线
-  const userXs = [], userYs = [];
-  for (const s of resonanceSamples) {
-    if (s.t > xMax) break;
-    if (s.userFreq) {
-      userXs.push(s.t / xMax);
-      userYs.push(s.userFreq);
-    }
-  }
-  if (userXs.length > 1) {
-    viz.ctx.strokeStyle = COLORS.USER;
-    viz.ctx.lineWidth = 2.5;
-    viz.ctx.beginPath();
-    for (let i = 0; i < userXs.length; i++) {
-      const x = userXs[i] * viz.w;
-      const y = viz.freqToY(userYs[i], yMin, yMax);
-      if (i === 0) viz.ctx.moveTo(x, y);
-      else viz.ctx.lineTo(x, y);
-    }
-    viz.ctx.stroke();
-  }
-  if (refSamples.length > 1) {
+  if (refPts.length > 1) {
     viz.ctx.strokeStyle = COLORS.REFERENCE;
     viz.ctx.lineWidth = 2.5;
     viz.ctx.beginPath();
-    for (let i = 0; i < refSamples.length; i += 2) {
-      const x = refSamples[i] * viz.w;
-      const y = viz.freqToY(refSamples[i + 1], yMin, yMax);
-      if (i === 0) viz.ctx.moveTo(x, y);
-      else viz.ctx.lineTo(x, y);
+    for (let i = 0; i < refPts.length; i++) {
+      if (i === 0) viz.ctx.moveTo(refPts[i][0], refPts[i][1]);
+      else viz.ctx.lineTo(refPts[i][0], refPts[i][1]);
     }
     viz.ctx.stroke();
   }
+
+  // 用户曲线
+  const userPts = [];
+  for (const s of resonanceSamples) {
+    if (s.t > xMax) break;
+    if (s.userFreq) userPts.push([plotX(s.t), viz.midiToY(freqToNoteNumber(s.userFreq))]);
+  }
+  if (userPts.length > 1) {
+    viz.ctx.strokeStyle = COLORS.USER;
+    viz.ctx.lineWidth = 2.5;
+    viz.ctx.beginPath();
+    for (let i = 0; i < userPts.length; i++) {
+      if (i === 0) viz.ctx.moveTo(userPts[i][0], userPts[i][1]);
+      else viz.ctx.lineTo(userPts[i][0], userPts[i][1]);
+    }
+    viz.ctx.stroke();
+  }
+
   // 融合点（在 x = 3/3.5）
   if (currentState === STATE.FUSED) {
-    viz.drawMarker(3.0 / 3.5, resonanceLockedFreq, yMin, yMax, COLORS.FUSION, 10);
+    viz.drawMarker(3.0 / 3.5, freqToNoteNumber(resonanceLockedFreq), COLORS.FUSION, 10);
   }
+  // 当前音高聚焦
+  viz.drawPitchFocus(currentPitchMidi(), plotX(Math.min(tNow, xMax)));
 }
 
 // === SECTION 9: 模式 4 - 跟唱旋律 ===
@@ -1052,30 +1045,28 @@ function actuallyStartFollow() {
   }, (totalDur + 0.2) * 1000);
 }
 
-// 渲染：x = 时间 0~总时长, y = 频率
+// 渲染：x = 时间 0~总时长, y = 音名（动态中心）
 function renderFollow() {
   if (currentMode !== 'follow') return;
   if (![STATE.SINGING, STATE.RESULT].includes(currentState)) return;
   const melody = followMelody;
   if (!melody) return;
   const total = melodyTotalDuration(melody);
-  const yMin = noteNameToFreq('C4') * 0.9;
-  const yMax = noteNameToFreq('C5') * 1.1;
-  viz.drawGrid(yMin, yMax, (v) => v.toFixed(0) + 'Hz');
+  const sideW = 28;
+  const plotX = (t) => sideW + (Math.min(t, total) / total) * (viz.w - 2 * sideW);
+  const tNow = currentState === STATE.RESULT ? total : (performance.now() - followStartTime) / 1000;
 
   // 目标曲线：阶梯化
-  const tNow = currentState === STATE.RESULT ? total : (performance.now() - followStartTime) / 1000;
   viz.ctx.strokeStyle = COLORS.REFERENCE;
   viz.ctx.lineWidth = 2.5;
   viz.ctx.beginPath();
   let started = false;
   for (const n of melody.notes) {
     if (n.start > tNow + 0.1) break;
-    const f = noteNameToFreq(n.note);
-    const x1 = (n.start / total) * viz.w;
-    const x2 = Math.min(tNow, n.start + n.duration) / total * viz.w;
+    const x1 = plotX(n.start);
+    const x2 = plotX(Math.min(tNow, n.start + n.duration));
     if (x1 >= viz.w) break;
-    const y = viz.freqToY(f, yMin, yMax);
+    const y = viz.midiToY(noteNameToMidi(n.note));
     if (!started) { viz.ctx.moveTo(x1, y); started = true; }
     else viz.ctx.lineTo(x1, y);
     viz.ctx.lineTo(x2, y);
@@ -1090,14 +1081,16 @@ function renderFollow() {
     viz.ctx.strokeStyle = color;
     viz.ctx.lineWidth = 2.5;
     viz.ctx.beginPath();
-    const x1 = (pts[i - 1].t / total) * viz.w;
-    const x2 = (pts[i].t / total) * viz.w;
-    const y1 = viz.freqToY(pts[i - 1].userFreq, yMin, yMax);
-    const y2 = viz.freqToY(pts[i].userFreq, yMin, yMax);
+    const x1 = plotX(pts[i - 1].t);
+    const x2 = plotX(pts[i].t);
+    const y1 = viz.midiToY(freqToNoteNumber(pts[i - 1].userFreq));
+    const y2 = viz.midiToY(freqToNoteNumber(pts[i].userFreq));
     viz.ctx.moveTo(x1, y1);
     viz.ctx.lineTo(x2, y2);
     viz.ctx.stroke();
   }
+  // 当前音高聚焦
+  viz.drawPitchFocus(currentPitchMidi(), plotX(tNow));
 }
 
 // === SECTION 9.5: 模式 5 - 听觉训练 ===
@@ -1625,11 +1618,21 @@ function renderCourseStepsList() {
   if (!list) return;
   list.innerHTML = '';
   COURSE_STEPS.forEach((step, i) => {
-    const chip = document.createElement('span');
+    const chip = document.createElement('button');
     chip.className = 'course-step-chip'
       + (courseProgress.completedSteps.includes(step.id) ? ' done' : '')
       + (i === currentStepIndex ? ' active' : '');
     chip.textContent = `${i + 1}. ${step.name}`;
+    // 点击任意关卡标签可直接跳关（不要求先通关）
+    chip.addEventListener('click', () => {
+      if (currentState !== STATE.IDLE) {
+        showError('请先停止当前练习再切换关卡');
+        return;
+      }
+      if (i === currentStepIndex) return;
+      currentStepIndex = i;
+      showCurrentStep();
+    });
     list.appendChild(chip);
   });
 }
@@ -1698,8 +1701,11 @@ function showPassOverlay(stepName, isLast) {
     if (isLast) {
       isFreePractice = true;
       showCurrentStep();
-    } else {
+    } else if (currentStepIndex < COURSE_STEPS.length - 1) {
       currentStepIndex++;
+      showCurrentStep();
+    } else {
+      // 已是最后一关但尚未全部通关（跳关场景）：留在原地
       showCurrentStep();
     }
   });
@@ -1727,6 +1733,34 @@ let courseProgress = loadProgress();
 let currentStepIndex = 0;  // 当前课程步骤索引
 let isFreePractice = false;  // 是否自由练习模式
 
+// 当前模式的「当前音高」（MIDI），用于 Y 轴中心与音名球
+function currentPitchMidi() {
+  if (currentMode === 'glissando') {
+    return pitchHistoryMidi.length ? pitchHistoryMidi[pitchHistoryMidi.length - 1] : null;
+  }
+  if (currentMode === 'cruise') {
+    const c = cruiseHistory.length ? cruiseHistory[cruiseHistory.length - 1] : null;
+    return c == null ? null : freqToNoteNumber(cruiseTargetFreq) + c / 100;
+  }
+  if (currentMode === 'resonance') {
+    if (currentState === STATE.PLAYING || currentState === STATE.FUSED) {
+      for (let i = resonanceSamples.length - 1; i >= 0; i--) {
+        if (resonanceSamples[i].userFreq) return freqToNoteNumber(resonanceSamples[i].userFreq);
+      }
+      return null;
+    }
+    const c = pitchHistory.length ? pitchHistory[pitchHistory.length - 1] : null;
+    return c == null ? null : 69 + c / 100;
+  }
+  if (currentMode === 'follow') {
+    for (let i = followSamples.length - 1; i >= 0; i--) {
+      if (followSamples[i].userFreq) return freqToNoteNumber(followSamples[i].userFreq);
+    }
+    return null;
+  }
+  return null;
+}
+
 if (typeof document !== 'undefined') {
   const onReady = () => {
     if (!checkBrowserSupport()) return;
@@ -1746,35 +1780,28 @@ if (typeof document !== 'undefined') {
       levelFill.style.width = Math.min(100, rms * 400) + '%';
     };
 
-    // 引擎滑音模式的 MIDI Y 轴范围（C4 ~ C5）
-    const GLISSANDO_MIN_MIDI = 60;
-    const GLISSANDO_MAX_MIDI = 72;
-
     function renderLoop() {
       viz.clear();
       // 顶部实时音频波形（所有模式通用）
       viz.drawWaveform(engine.buffer);
+      // 主图区 Y 轴以当前音为中心，平滑跟随
+      viz.updateAxis(currentPitchMidi());
       if (currentMode === 'glissando') {
-        // 引擎滑音：音名 Y 轴 + MIDI 曲线 + 最近半音参考线 + 音高球
-        viz.drawNoteGrid('C4', 'C5');
-        viz.drawCurveByMidi(pitchHistoryMidi, GLISSANDO_MIN_MIDI, GLISSANDO_MAX_MIDI, COLORS.USER);
-        const lastMidi = pitchHistoryMidi[pitchHistoryMidi.length - 1];
-        if (lastMidi != null) {
-          const noteName = freqToNoteName(noteNumberToFreq(lastMidi));
-          viz.drawNearestSemitoneLine(lastMidi, GLISSANDO_MIN_MIDI, GLISSANDO_MAX_MIDI);
-          viz.drawPitchBall(lastMidi, GLISSANDO_MIN_MIDI, GLISSANDO_MAX_MIDI, noteName, COLORS.REFERENCE);
-        }
+        // 引擎滑音：音名 Y 轴 + MIDI 曲线 + 音高聚焦
+        viz.drawNoteGrid();
+        viz.drawCurveByMidi(pitchHistoryMidi, COLORS.USER);
+        viz.drawPitchFocus(currentPitchMidi());
       } else if (currentMode === 'cruise') {
-        // 直线巡航：cents Y 轴 + 目标线 + ±50 cents 边界线（虚线，淡色）
-        viz.drawGrid(-100, 100, (v) => (v >= 0 ? '+' : '') + Math.round(v) + '¢');
-        viz.drawTargetLine(0, -100, 100, COLORS.TARGET, '目标');
-        viz.drawTargetLine(-50, -100, 100, '#475569', '');
-        viz.drawTargetLine(50, -100, 100, '#475569', '');
-        viz.drawCurve(cruiseHistory, -100, 100, COLORS.USER);
+        // 直线巡航：音名 Y 轴 + 目标音线 + ±50¢ 边界线（淡色）
+        viz.drawNoteGrid();
+        viz.drawTargetLine(freqToNoteNumber(cruiseTargetFreq), COLORS.TARGET, '目标');
+        viz.drawTargetLine(freqToNoteNumber(cruiseTargetFreq) - 0.5, '#475569', '');
+        viz.drawTargetLine(freqToNoteNumber(cruiseTargetFreq) + 0.5, '#475569', '');
+        viz.drawCurveByMidi(cruiseHistory.map((c) => (c == null ? null : freqToNoteNumber(cruiseTargetFreq) + c / 100)), COLORS.USER);
+        viz.drawPitchFocus(currentPitchMidi());
       } else {
-        // 共振 / 跟唱：default（会被 renderResonance/renderFollow 覆盖）
-        viz.drawGrid(-1200, 1200, (v) => (v >= 0 ? '+' : '') + Math.round(v) + '¢');
-        viz.drawCurve(pitchHistory, -1200, 1200, COLORS.USER);
+        // 共振 / 跟唱：统一音名 Y 轴，曲线由 renderResonance / renderFollow 绘制
+        viz.drawNoteGrid();
       }
       renderResonance();
       renderFollow();
@@ -1842,7 +1869,8 @@ if (typeof document !== 'undefined') {
       setState(STATE.IDLE);
       // 通关弹层
       if (passed) {
-        const isLast = currentStepIndex === COURSE_STEPS.length - 1;
+        // 是否全部关卡通关（有跳关时不能只看当前索引）
+        const isLast = courseProgress.completedSteps.length >= COURSE_STEPS.length;
         showPassOverlay(COURSE_STEPS[currentStepIndex].name, isLast);
       }
     });

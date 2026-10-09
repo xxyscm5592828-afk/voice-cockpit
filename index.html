@@ -4,22 +4,50 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>声音驾驶舱</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=35">
 </head>
 <body>
   <header class="app-header">
-    <h1>🎵 声音驾驶舱</h1>
+    <span class="app-logo" aria-hidden="true">🎵</span>
+    <div>
+      <h1>声音驾驶舱</h1>
+      <p class="app-subtitle">VOICE COCKPIT</p>
+    </div>
   </header>
 
-  <nav class="mode-tabs" role="tablist">
-    <button class="tab active" data-mode="glissando" role="tab">引擎滑音</button>
-    <button class="tab" data-mode="cruise" role="tab">直线巡航</button>
-    <button class="tab" data-mode="resonance" role="tab">共振对齐</button>
-    <button class="tab" data-mode="follow" role="tab">跟唱</button>
-  </nav>
+  <div class="course-bar" id="course-bar">
+    <div class="course-progress">
+      <div class="course-progress-track">
+        <div class="course-progress-fill" id="course-progress-fill"></div>
+      </div>
+      <span class="course-progress-text" id="course-progress-text">1/5</span>
+    </div>
+    <h2 class="course-step-title" id="course-step-title">第 1 步：听觉训练</h2>
+    <p class="course-step-desc" id="course-step-desc">先学会听出两个音的差别</p>
+  </div>
 
   <main class="dashboard">
+    <div id="feedback-bar" class="feedback-bar" hidden></div>
     <canvas id="canvas" width="800" height="400"></canvas>
+
+    <!-- 听觉训练面板（独立于 canvas） -->
+    <div id="ear-training-panel" class="ear-training-panel" hidden>
+      <div class="et-progress">
+        <span>等级 <strong id="et-level">1</strong></span>
+        <span>题目 <strong id="et-question">1</strong>/10</span>
+        <span>正确率 <strong id="et-accuracy">—</strong></span>
+      </div>
+      <div class="et-instruction" id="et-instruction">点击「开始」启动听觉训练</div>
+      <div class="et-play-buttons">
+        <button id="et-play-a" class="et-play-btn" disabled>▶ 听音 A</button>
+        <button id="et-play-b" class="et-play-btn" disabled>▶ 听音 B</button>
+      </div>
+      <div class="et-answer-buttons">
+        <button id="et-answer-same" class="et-answer-btn" disabled>相同</button>
+        <button id="et-answer-diff" class="et-answer-btn" disabled>不同</button>
+      </div>
+      <div class="et-feedback" id="et-feedback"></div>
+    </div>
 
     <div class="readout">
       <span class="readout-item">当前音: <strong id="current-note">—</strong></span>
@@ -60,6 +88,9 @@
       <h2>练习统计</h2>
       <div id="stats-content"></div>
       <div class="stats-actions">
+        <button id="stats-export" class="secondary">导出数据</button>
+        <button id="stats-import" class="secondary">导入数据</button>
+        <input type="file" id="stats-import-file" accept=".json,application/json" hidden>
         <button id="stats-reset" class="secondary">重置数据</button>
         <button id="stats-close" class="primary">关闭</button>
       </div>
@@ -69,6 +100,6 @@
   <div id="error-banner" class="error-banner" hidden></div>
 
   <script src="vendor/pitchy.min.js"></script>
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=35"></script>
 </body>
 </html>

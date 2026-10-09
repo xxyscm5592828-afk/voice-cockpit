@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   freqToNoteNumber, noteNumberToFreq, freqToNoteName, freqToCents,
-  isInTune, calcStability, calcSmoothness,
+  isInTune, calcStability, calcSmoothness, octaveCorrect,
 } from '../app.js';
 
 test('freqToNoteNumber: A4=440 → 69', () => {
@@ -83,4 +83,35 @@ test('calcSmoothness: 锯齿 → 接近 0', () => {
   const jagged = [100, 200, 100, 200, 100, 200, 100, 200];
   const result = calcSmoothness(jagged);
   assert.ok(result < 0.5, `expected < 0.5, got ${result}`);
+});
+
+test('octaveCorrect: 首帧无基准 → 原样返回', () => {
+  assert.deepEqual(octaveCorrect(440, null, 0), [440, 0]);
+});
+
+test('octaveCorrect: 单帧跳高八度 → 拉回', () => {
+  assert.deepEqual(octaveCorrect(880, 440, 0), [440, 1]);
+});
+
+test('octaveCorrect: 单帧跳低八度 → 拉回', () => {
+  assert.deepEqual(octaveCorrect(220, 440, 0), [440, 1]);
+});
+
+test('octaveCorrect: 正常音高变化 → 不修正', () => {
+  assert.deepEqual(octaveCorrect(494, 440, 0), [494, 0]);  // 纯四度以内
+  assert.deepEqual(octaveCorrect(415.3, 440, 0), [415.3, 0]); // 半音级小偏差
+});
+
+test('octaveCorrect: 连续 3 帧翻倍 → 认定真实换八度', () => {
+  const [, streak1] = octaveCorrect(880, 440, 0);
+  const [, streak2] = octaveCorrect(880, 440, streak1);
+  assert.deepEqual(octaveCorrect(880, 440, streak2), [880, 0]);
+});
+
+test('octaveCorrect: 边界附近小音程不被误判', () => {
+  // 真实音程：倍频程附近但不是整八度（如 +900 cents ≈ 1.68 倍、-900 ≈ 0.59 倍）
+  const up900 = 440 * Math.pow(2, 900 / 1200);
+  const down900 = 440 * Math.pow(2, -900 / 1200);
+  assert.deepEqual(octaveCorrect(up900, 440, 0), [up900, 0]);
+  assert.deepEqual(octaveCorrect(down900, 440, 0), [down900, 0]);
 });
